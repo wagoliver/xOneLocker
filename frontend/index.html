@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Locker - Regras</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Instrument+Sans:wght@400;600;700&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.cdnfonts.com/css/cal-sans"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-accent"></div>
+    <div class="noise-overlay"></div>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">LR</div>
+          <div>
+            <div class="brand-title">Locker Rules</div>
+            <div class="brand-subtitle">MVP de regras e chamadas API</div>
+          </div>
+        </div>
+        <div class="nav-actions">
+          <nav class="nav">
+            <button class="nav-btn is-active" data-view="control">Controle</button>
+            <button class="nav-btn" data-view="records">Registros API</button>
+            <button class="nav-btn" data-view="audit">Auditoria</button>
+            <button class="nav-btn admin-only" data-view="users">Usuarios</button>
+            <button class="nav-btn" data-view="token">Token API</button>
+          </nav>
+          <button id="logout-btn" class="ghost">Sair</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="view-login" class="view login-page is-active">
+          <div class="login-card">
+            <h1>Entrar</h1>
+            <p class="muted">Acesse para gerenciar regras e sincronismos</p>
+            <form id="login-form" class="form-card">
+              <div class="form-grid">
+                <label>
+                  Usuario
+                  <input type="text" name="username" required />
+                </label>
+                <label>
+                  Senha
+                  <input type="password" name="password" required />
+                </label>
+              </div>
+              <div id="login-feedback" class="feedback"></div>
+              <div class="actions">
+                <button type="submit" class="primary">Entrar</button>
+                <button type="button" id="go-register" class="ghost">
+                  Criar conta
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section id="view-register" class="view login-page">
+          <div class="login-card">
+            <h1>Criar conta</h1>
+            <p class="muted">Seu cadastro precisa ser aprovado pelo admin</p>
+            <form id="register-form" class="form-card">
+              <div class="form-grid">
+                <label>
+                  Usuario
+                  <input type="text" name="username" required />
+                </label>
+                <label>
+                  Email
+                  <input type="email" name="email" required />
+                </label>
+                <label>
+                  Telefone
+                  <input type="tel" name="phone" required />
+                </label>
+                <label>
+                  Senha
+                  <input type="password" name="password" required />
+                </label>
+              </div>
+              <div id="register-feedback" class="feedback"></div>
+              <div class="actions">
+                <button type="submit" class="primary">Cadastrar</button>
+                <button type="button" id="go-login" class="ghost">Voltar</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section id="view-control" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Controle</h1>
+              <p class="muted">Visao por alvo com base nos agendamentos</p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="control-sync-btn" class="ghost">Sincronizar</button>
+              <button id="control-new-btn" class="primary">Novo</button>
+            </div>
+          </div>
+
+          <div class="control-tabs">
+            <button class="control-tab is-active" data-control-tab="visual">Visual</button>
+            <button class="control-tab" data-control-tab="table">Tabela</button>
+          </div>
+
+          <div class="control-filters">
+            <div class="control-search">
+              <input
+                id="control-search"
+                type="search"
+                placeholder="Buscar usuario, hostname ou ID API..."
+              />
+            </div>
+            <div class="control-filter-group">
+              <label class="control-filter">
+                Tipo
+                <select id="control-target-filter">
+                  <option value="all">Todos</option>
+                  <option value="user">User</option>
+                  <option value="hostname">Hostname</option>
+                </select>
+              </label>
+              <label class="control-filter">
+                Estado
+                <select id="control-state-filter">
+                  <option value="all">Todos</option>
+                  <option value="locked">Bloqueado</option>
+                  <option value="unlocked">Desbloqueado</option>
+                  <option value="unknown">Indefinido</option>
+                  <option value="expired">Expirado</option>
+                </select>
+              </label>
+              <label class="control-filter">
+                Acao
+                <select id="control-action-filter">
+                  <option value="all">Todas</option>
+                  <option value="lock">Lock</option>
+                  <option value="unlock">Unlock</option>
+                </select>
+              </label>
+              <label class="control-filter">
+                Ordenar
+                <select id="control-order">
+                  <option value="next">Proxima acao</option>
+                  <option value="last">Ultima acao</option>
+                  <option value="status">Status API</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div id="control-feedback" class="feedback"></div>
+          <div id="control-visual" class="control-list"></div>
+          <div id="control-table" class="table-card"></div>
+        </section>
+
+        <section id="view-rule-form" class="view">
+          <div class="toolbar">
+            <div>
+              <h1 id="form-title">Nova regra</h1>
+              <p class="muted">Campos alinhados com o cadastro de agendamentos</p>
+            </div>
+            <button id="back-to-list" class="ghost">Voltar</button>
+          </div>
+          <form id="rule-form" class="form-card">
+            <div class="form-grid">
+              <label>
+                ID da API
+                <input type="text" name="remote_id" id="remote-id" disabled />
+                <div class="field-hint">Campo do schema: id (retorno)</div>
+              </label>
+              <label>
+                Mensagem
+                <input
+                  type="text"
+                  name="message"
+                  required
+                  placeholder="Ex: Liberacao programada"
+                />
+                <div class="field-hint">Campo do schema: message</div>
+              </label>
+              <label>
+                Tipo de acao
+                <select name="actionType" required>
+                  <option value="">Selecione</option>
+                  <option value="0">Lock</option>
+                  <option value="1">Unlock</option>
+                </select>
+                <div class="field-hint">Campo do schema: actionType</div>
+              </label>
+              <label>
+                Tipo de alvo
+                <select name="targetType" required>
+                  <option value="">Selecione</option>
+                  <option value="0">User</option>
+                  <option value="1">Hostname</option>
+                </select>
+                <div class="field-hint">Campo do schema: targetType</div>
+              </label>
+              <label>
+                Alvo
+                <input type="text" name="targetValue" required placeholder="Ex: usuario@empresa" />
+                <div class="field-hint">Campo do schema: targetValue</div>
+              </label>
+              <label>
+                Tipo de agendamento
+                <select name="scheduleType" required id="schedule-type">
+                  <option value="">Selecione</option>
+                  <option value="0">Once</option>
+                  <option value="1">Recurring</option>
+                </select>
+                <div class="field-hint">Campo do schema: scheduleType</div>
+              </label>
+              <label>
+                Inicio
+                <input type="datetime-local" name="startDate" required />
+                <div class="field-hint">Campo do schema: startDate</div>
+              </label>
+              <label>
+                Fim
+                <input type="datetime-local" name="endDate" />
+                <div class="field-hint">Campo do schema: endDate</div>
+              </label>
+              <label id="recurrence-field">
+                Recorrencia
+                <select name="recurrenceType">
+                  <option value="">Nao usar</option>
+                  <option value="0">Daily</option>
+                  <option value="1">Weekly</option>
+                  <option value="2">Monthly</option>
+                </select>
+                <div class="field-hint">Campo do schema: recurrenceType</div>
+              </label>
+              <label id="start-time-field">
+                Hora inicial
+                <input type="time" name="startTime" />
+                <div class="field-hint">Campo do schema: startTime</div>
+              </label>
+              <label id="end-time-field">
+                Hora final
+                <input type="time" name="endTime" />
+                <div class="field-hint">Campo do schema: endTime</div>
+              </label>
+              <div class="checkbox-group span-2" id="days-of-week-group">
+                <span>Dias da semana (0=Dom)</span>
+                <div class="checkboxes">
+                  <label><input type="checkbox" name="daysOfWeek" value="0" />Dom</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="1" />Seg</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="2" />Ter</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="3" />Qua</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="4" />Qui</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="5" />Sex</label>
+                  <label><input type="checkbox" name="daysOfWeek" value="6" />Sab</label>
+                </div>
+                <div class="field-hint">Campo do schema: daysOfWeek</div>
+                <div class="rule-note">Use apenas para recorrencia semanal.</div>
+              </div>
+            </div>
+            <div id="rule-feedback" class="feedback"></div>
+            <div class="actions">
+              <button type="submit" class="primary" id="form-submit">
+                Salvar e chamar API
+              </button>
+              <button type="button" class="ghost" id="cancel-rule">Cancelar</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="view-token" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Token para chamadas</h1>
+              <p class="muted">Use o Bearer token do Integration API</p>
+            </div>
+          </div>
+          <form id="token-form" class="form-card">
+            <div class="form-grid">
+              <label>
+                Bearer token
+                <input type="text" name="bearer_token" placeholder="Cole o token JWT" />
+              </label>
+            </div>
+            <div id="token-feedback" class="feedback"></div>
+            <div class="actions">
+              <button type="submit" class="primary">Salvar token</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="view-audit" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Auditoria</h1>
+              <p class="muted">Registro das chamadas e acoes executadas</p>
+            </div>
+            <button id="refresh-audit" class="ghost">Atualizar</button>
+          </div>
+          <div id="audit-feedback" class="feedback"></div>
+          <div id="audit-list" class="table-card"></div>
+        </section>
+
+        <section id="view-records" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Registros na API</h1>
+              <p class="muted">Bloqueios, desbloqueios e condicoes cadastradas</p>
+            </div>
+            <button id="refresh-records" class="primary">Sincronizar</button>
+          </div>
+          <div class="segment">
+            <button class="segment-btn is-active" data-record="schedules">
+              Agendamentos (Lock/Unlock)
+            </button>
+            <button class="segment-btn" data-record="user-unlocks">Desbloqueio Usuario</button>
+            <button class="segment-btn" data-record="hostname-unlocks">
+              Desbloqueio Hostname
+            </button>
+          </div>
+          <div id="records-feedback" class="feedback"></div>
+          <div id="records-list" class="table-card"></div>
+        </section>
+
+        <section id="view-users" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Usuarios</h1>
+              <p class="muted">Aprovacao de contas pendentes</p>
+            </div>
+            <button id="refresh-users" class="ghost">Atualizar</button>
+          </div>
+          <div id="users-feedback" class="feedback"></div>
+          <div id="users-list" class="table-card"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="json-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="modal-title">Detalhes</h2>
+          <button id="close-modal" class="ghost">Fechar</button>
+        </div>
+        <pre id="json-content" class="modal-content"></pre>
+      </div>
+    </div>
+
+    <div id="confirm-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="confirm-title">Confirmar</h2>
+          <button id="confirm-close" class="ghost">Fechar</button>
+        </div>
+        <p id="confirm-message" class="modal-confirm-message"></p>
+        <div class="actions confirm-actions">
+          <button id="confirm-cancel" class="ghost">Cancelar</button>
+          <button id="confirm-ok" class="primary">Confirmar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="schedule-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="schedule-title">Agendar</h2>
+          <button id="schedule-close" class="ghost">Fechar</button>
+        </div>
+        <div class="form-grid schedule-grid">
+          <label>
+            Tipo de agendamento
+            <select id="schedule-type-select">
+              <option value="0">Once</option>
+              <option value="1">Recurring</option>
+            </select>
+          </label>
+          <label>
+            Inicio
+            <input type="datetime-local" id="schedule-start" required />
+          </label>
+          <label>
+            Fim
+            <input type="datetime-local" id="schedule-end" required />
+          </label>
+          <label id="schedule-recurrence-field">
+            Recorrencia
+            <select id="schedule-recurrence">
+              <option value="">Selecione</option>
+              <option value="0">Daily</option>
+              <option value="1">Weekly</option>
+              <option value="2">Monthly</option>
+            </select>
+          </label>
+          <label id="schedule-start-time-field">
+            Hora inicial
+            <input type="time" id="schedule-start-time" />
+          </label>
+          <label id="schedule-end-time-field">
+            Hora final
+            <input type="time" id="schedule-end-time" />
+          </label>
+          <div class="checkbox-group span-2" id="schedule-days-group">
+            <span>Dias da semana (0=Dom)</span>
+            <div class="checkboxes">
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="0" />Dom</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="1" />Seg</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="2" />Ter</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="3" />Qua</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="4" />Qui</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="5" />Sex</label>
+              <label><input type="checkbox" name="scheduleDaysOfWeek" value="6" />Sab</label>
+            </div>
+          </div>
+        </div>
+        <div id="schedule-feedback" class="feedback"></div>
+        <div class="actions confirm-actions">
+          <button id="schedule-cancel" class="ghost">Cancelar</button>
+          <button id="schedule-save" class="primary">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="control-menu" class="context-menu">
+      <button type="button" class="context-item" data-action="lock-now">
+        Bloquear agora
+      </button>
+      <button type="button" class="context-item" data-action="schedule-lock">
+        Agendar bloqueio...
+      </button>
+      <button type="button" class="context-item" data-action="schedule-unlock">
+        Agendar desbloqueio...
+      </button>
+      <button type="button" class="context-item" data-action="duplicate">
+        Duplicar regra
+      </button>
+      <button type="button" class="context-item" data-action="audit">
+        Ver historico / auditoria
+      </button>
+      <button type="button" class="context-item" data-action="json">
+        Ver JSON
+      </button>
+      <button type="button" class="context-item is-danger" data-action="delete">
+        Excluir
+      </button>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
