@@ -652,10 +652,45 @@ function buildScheduleSummary(schedule) {
   };
 }
 
+function getScheduleSortTimestamp(schedule) {
+  const createdAt = schedule.created_at ? new Date(schedule.created_at) : null;
+  if (createdAt && !Number.isNaN(createdAt.getTime())) {
+    return createdAt.getTime();
+  }
+  const startDate = schedule.start_date ? new Date(schedule.start_date) : null;
+  if (startDate && !Number.isNaN(startDate.getTime())) {
+    return startDate.getTime();
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function compareSchedulesByQueue(a, b) {
+  const aPriority = a.action_type === 1 ? 0 : 1;
+  const bPriority = b.action_type === 1 ? 0 : 1;
+  if (aPriority !== bPriority) return aPriority - bPriority;
+
+  const aTime = getScheduleSortTimestamp(a);
+  const bTime = getScheduleSortTimestamp(b);
+  if (aTime !== bTime) return aTime - bTime;
+
+  const aStart = a.start_date ? new Date(a.start_date).getTime() : Number.MAX_SAFE_INTEGER;
+  const bStart = b.start_date ? new Date(b.start_date).getTime() : Number.MAX_SAFE_INTEGER;
+  if (aStart !== bStart) return aStart - bStart;
+
+  const aId = Number(a.id || 0);
+  const bId = Number(b.id || 0);
+  return aId - bId;
+}
+
+function sortSchedulesForQueue(schedules) {
+  return [...(schedules || [])].sort(compareSchedulesByQueue);
+}
+
 function openScheduleListModal(group) {
   if (!group) return;
   const targetLabel = TARGET_LABEL[group.targetType] || "Alvo";
-  const lines = (group.schedules || []).map((schedule) => {
+  const sorted = group.sortedSchedules || group.schedules || [];
+  const lines = sorted.map((schedule) => {
     const summary = buildScheduleSummary(schedule);
     return [
       `${summary.actionLabel} | ${summary.scheduleLabel}`,
@@ -836,7 +871,7 @@ function findLastOccurrence(schedule, now) {
 function getScheduleOccurrenceInfo(schedule, now) {
   const scheduleType = Number(schedule.schedule_type ?? 0);
   const endDate = schedule.end_date ? new Date(schedule.end_date) : null;
-  const expired = endDate ? endDate < now : scheduleType === 0 && new Date(schedule.start_date) < now;
+  const expired = endDate ? endDate < now : false;
   const next = findNextOccurrence(schedule, now);
   const last = findLastOccurrence(schedule, now);
   const active = next ? next.isActive : false;
@@ -887,6 +922,8 @@ function buildControlItems(schedules) {
   let index = 0;
 
   groups.forEach((group) => {
+    const sortedSchedules = sortSchedulesForQueue(group.schedules);
+    const queueLeader = sortedSchedules[0] || null;
     let activeCandidate = null;
     let lastCandidate = null;
     let nextCandidate = null;
@@ -969,17 +1006,15 @@ function buildControlItems(schedules) {
     });
 
     let plannedState = "unknown";
-    if (activeCandidate) {
-      plannedState = activeCandidate.actionType === 1 ? "unlocked" : "locked";
-    } else if (lastCandidate) {
-      plannedState = lastCandidate.actionType === 1 ? "unlocked" : "locked";
+    if (queueLeader) {
+      plannedState = queueLeader.action_type === 1 ? "unlocked" : "locked";
     }
 
     const expired = nextCandidate === null && expiredCount === group.schedules.length;
     const displayState = expired ? "expired" : plannedState;
 
     const representativeSchedule =
-      lastCandidate?.schedule || nextCandidate?.schedule || group.schedules[0];
+      queueLeader || lastCandidate?.schedule || nextCandidate?.schedule || group.schedules[0];
 
     const searchText = [
       group.targetValue,
@@ -1004,6 +1039,7 @@ function buildControlItems(schedules) {
       lastApiCalledAt: lastApi?.calledAt ?? null,
       representativeSchedule,
       schedules: group.schedules,
+      sortedSchedules,
       searchText,
     };
 
@@ -1314,6 +1350,7 @@ function renderControlVisual(items) {
     return;
   }
 
+  const now = new Date();
   const rows = items
     .map((item) => {
       const stateLabel = PLANNED_STATE_LABEL[item.displayState] || "Indefinido";
@@ -1340,16 +1377,18 @@ function renderControlVisual(items) {
         iconAlt = "Desbloqueado";
       }
       const expiredClass = item.displayState === "expired" ? "is-expired" : "";
-      const scheduleRows = (item.schedules || [])
-        .slice()
-        .sort((a, b) => new Date(a.start_date) - new Date(b.start_date))
+      const scheduleRows = (item.sortedSchedules || item.schedules || [])
         .map((schedule) => {
           const summary = buildScheduleSummary(schedule);
+          const info = getScheduleOccurrenceInfo(schedule, now);
+          const actionClass =
+            Number(schedule.action_type) === 1 ? "is-unlock" : "is-lock";
+          const expiredClass = info.expired ? "is-expired" : "";
           const deleteButton = schedule.id
             ? `<button class="ghost control-delete-schedule" data-id="${schedule.id}" type="button">Excluir</button>`
             : "";
           return `
-            <div class="control-schedule-row">
+            <div class="control-schedule-row ${actionClass} ${expiredClass}">
               <span class="control-schedule-action">${escapeHtml(
                 summary.actionLabel
               )}</span>
@@ -1634,6 +1673,9 @@ function handleControlAction(action, group) {
     case "lock-now":
       createImmediateSchedule(group, 0);
       break;
+    case "unlock-now":
+      createImmediateSchedule(group, 1);
+      break;
     case "schedule-lock":
       openScheduleModal({ actionType: 0, targetType, targetValue });
       break;
@@ -1710,6 +1752,18 @@ async function createImmediateSchedule(group, actionType) {
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data?.error || "Falha ao criar bloqueio imediato.");
+    }
+    const apiFailure = getApiFailureDetails(data?.api);
+    if (apiFailure) {
+      if (controlFeedback) {
+        const detail = apiFailure.detail
+          ? ` ${apiFailure.detail}`
+          : "";
+        controlFeedback.textContent = `${apiFailure.message}${detail}`;
+        controlFeedback.className = "feedback is-error";
+      }
+      await loadControl();
+      return;
     }
     if (controlFeedback) {
       controlFeedback.textContent =
@@ -2139,6 +2193,46 @@ function formatResponseText(responseText) {
   }
 }
 
+function getApiFailureDetails(api) {
+  if (!api || api.ok !== false) return null;
+  const statusLabel = api.status ? `Status ${api.status}` : "Status desconhecido";
+  let detail = api.error || api.responseText || "";
+  let parsed = null;
+  if (detail && typeof detail !== "string") {
+    parsed = detail;
+    detail = JSON.stringify(detail);
+  } else if (typeof detail === "string" && detail.trim().startsWith("{")) {
+    try {
+      parsed = JSON.parse(detail);
+    } catch {
+      parsed = null;
+    }
+  }
+  const parsedStatus = parsed?.status || null;
+  const description =
+    Array.isArray(parsed?.messages) && parsed.messages.length > 0
+      ? parsed.messages
+          .map((msg) => msg?.description || msg?.message || "")
+          .filter(Boolean)
+          .join(" | ")
+      : null;
+  const formatted =
+    parsedStatus || description
+      ? [
+          parsedStatus ? `Status: ${parsedStatus}` : null,
+          description ? `Descricao: ${description}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : detail
+      ? formatResponseText(detail)
+      : "";
+  return {
+    message: `Falha na API externa (${statusLabel}).`,
+    detail: formatted,
+  };
+}
+
 function openResponseModal(schedule) {
   const status = schedule.last_api_status ?? "-";
   const errorText = schedule.last_api_error
@@ -2413,6 +2507,19 @@ if (scheduleSaveButton) {
       if (!response.ok) {
         throw new Error(data?.error || "Falha ao agendar.");
       }
+      const apiFailure = getApiFailureDetails(data?.api);
+      if (apiFailure) {
+        if (scheduleFeedback) {
+          const detailBlock = apiFailure.detail
+            ? `<div class="response-box">${escapeHtml(apiFailure.detail)}</div>`
+            : "";
+          scheduleFeedback.innerHTML = `<div>${escapeHtml(
+            apiFailure.message
+          )}</div>${detailBlock}`;
+          scheduleFeedback.classList.add("is-error");
+        }
+        return;
+      }
       closeScheduleModal();
       showView("control");
       if (controlFeedback) {
@@ -2632,6 +2739,18 @@ ruleForm.addEventListener("submit", async (event) => {
 
     if (!response.ok) {
       ruleFeedback.textContent = data.error || "Erro ao salvar a regra.";
+      ruleFeedback.classList.add("is-error");
+      return;
+    }
+
+    const apiFailure = getApiFailureDetails(data?.api);
+    if (apiFailure) {
+      const detailBlock = apiFailure.detail
+        ? `<div class="response-box">${escapeHtml(apiFailure.detail)}</div>`
+        : "";
+      ruleFeedback.innerHTML = `<div>${escapeHtml(
+        apiFailure.message
+      )}</div>${detailBlock}`;
       ruleFeedback.classList.add("is-error");
       return;
     }

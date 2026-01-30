@@ -98,6 +98,23 @@ body {
   font-weight: 600;
 }
 
+.brand-logo {
+  width: 150px;
+  height: 44px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  align-self: center;
+}
+
+.brand-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  transform: translateY(-2px);
+}
+
 .brand-title {
   font-size: 18px;
   font-weight: 700;
@@ -446,6 +463,18 @@ textarea::placeholder {
   box-shadow: var(--shadow);
 }
 
+#schedule-modal {
+  z-index: 15;
+}
+
+#json-modal {
+  z-index: 20;
+}
+
+#confirm-modal {
+  z-index: 30;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -640,6 +669,22 @@ textarea::placeholder {
 .control-schedule-action {
   font-weight: 600;
   color: var(--ink);
+}
+
+.control-schedule-row.is-lock .control-schedule-action {
+  color: #f87171;
+}
+
+.control-schedule-row.is-unlock .control-schedule-action {
+  color: #34d399;
+}
+
+.control-schedule-row.is-expired {
+  color: #9ca3af;
+}
+
+.control-schedule-row.is-expired .control-schedule-action {
+  color: #9ca3af;
 }
 
 .control-schedule-spacer {
