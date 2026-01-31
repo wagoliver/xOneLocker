@@ -1015,6 +1015,7 @@ function buildControlItems(schedules) {
 
     const representativeSchedule =
       queueLeader || lastCandidate?.schedule || nextCandidate?.schedule || group.schedules[0];
+    const lastApiSchedule = lastApi?.schedule || null;
 
     const searchText = [
       group.targetValue,
@@ -1037,6 +1038,7 @@ function buildControlItems(schedules) {
       lastOccurrence: lastCandidate,
       lastApiStatus: lastApi?.status ?? null,
       lastApiCalledAt: lastApi?.calledAt ?? null,
+      lastApiSchedule,
       representativeSchedule,
       schedules: group.schedules,
       sortedSchedules,
@@ -1697,15 +1699,21 @@ function handleControlAction(action, group) {
       }
       break;
     case "json":
-      openJsonModalWithData("Resumo do alvo", {
-        targetType: TARGET_LABEL[targetType] || targetType,
-        targetValue,
-        plannedState: PLANNED_STATE_LABEL[group.displayState] || group.displayState,
-        nextOccurrence: group.nextOccurrence?.start || null,
-        lastOccurrence: group.lastOccurrence?.start || null,
-        lockCount: group.lockCount,
-        unlockCount: group.unlockCount,
-      });
+      if (group.lastApiSchedule || representativeSchedule) {
+        const schedule = group.lastApiSchedule || representativeSchedule;
+        const targetLabel = TARGET_LABEL[targetType] || "Alvo";
+        openJsonModal(schedule, `JSON - ${targetLabel}: ${targetValue}`);
+      } else {
+        openJsonModalWithData("Resumo do alvo", {
+          targetType: TARGET_LABEL[targetType] || targetType,
+          targetValue,
+          plannedState: PLANNED_STATE_LABEL[group.displayState] || group.displayState,
+          nextOccurrence: group.nextOccurrence?.start || null,
+          lastOccurrence: group.lastOccurrence?.start || null,
+          lockCount: group.lockCount,
+          unlockCount: group.unlockCount,
+        });
+      }
       break;
     case "delete": {
       const scheduleId = representativeSchedule?.id;
@@ -2178,9 +2186,32 @@ function closeConfirmModal(result = false) {
   }
 }
 
-function openJsonModal(schedule) {
+function openJsonModal(schedule, title) {
   const payload = buildPayloadFromSchedule(schedule);
-  openModal("JSON enviado para a API", JSON.stringify(payload, null, 2));
+  const payloadText = JSON.stringify(payload, null, 2);
+  const status = schedule.last_api_status ?? "-";
+  const errorText = schedule.last_api_error
+    ? `Erro: ${schedule.last_api_error}`
+    : "Erro: -";
+  const responseText = formatResponseText(schedule.last_api_response);
+  const calledAt = schedule.last_api_called_at
+    ? formatDate(schedule.last_api_called_at)
+    : "-";
+  const remoteId = schedule.remote_schedule_id || "-";
+  const content = [
+    "Request:",
+    payloadText,
+    "",
+    "Response:",
+    `Ultima chamada: ${calledAt}`,
+    `Remote ID: ${remoteId}`,
+    `Status: ${status}`,
+    errorText,
+    "",
+    "Body:",
+    responseText,
+  ].join("\n");
+  openModal(title || "JSON enviado para a API", content);
 }
 
 function formatResponseText(responseText) {
@@ -2452,11 +2483,11 @@ if (scheduleSaveButton) {
       daysOfWeek: scheduleType === 1 && daysOfWeek.length ? daysOfWeek : null,
       startTime:
         scheduleType === 1
-          ? normalizeTimeWithSeconds(scheduleStartTimeInput?.value)
+          ? normalizeTimeForApi(scheduleStartTimeInput?.value)
           : null,
       endTime:
         scheduleType === 1
-          ? normalizeTimeWithSeconds(scheduleEndTimeInput?.value)
+          ? normalizeTimeForApi(scheduleEndTimeInput?.value)
           : null,
       targetType: scheduleContext.targetType,
       targetValue: scheduleContext.targetValue,
@@ -2625,8 +2656,7 @@ function toInputDateTime(value) {
 
 function normalizeTime(value) {
   if (!value) return "";
-  if (value.length >= 8) return value.slice(0, 8);
-  if (value.length === 5) return `${value}:00`;
+  if (value.length >= 5) return value.slice(0, 5);
   return value;
 }
 
@@ -2635,12 +2665,12 @@ function normalizeText(value) {
   return value.trim();
 }
 
-function normalizeTimeWithSeconds(value) {
+function normalizeTimeForApi(value) {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed;
-  if (/^\d{2}:\d{2}$/.test(trimmed)) return `${trimmed}:00`;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed.slice(0, 5);
+  if (/^\d{2}:\d{2}$/.test(trimmed)) return trimmed;
   return trimmed;
 }
 
@@ -2669,8 +2699,8 @@ ruleForm.addEventListener("submit", async (event) => {
     endDate: normalizeDateTime(formData.get("endDate")),
     recurrenceType: normalizeNumber(formData.get("recurrenceType")),
     daysOfWeek: daysOfWeek.length > 0 ? daysOfWeek : null,
-    startTime: normalizeTimeWithSeconds(formData.get("startTime")),
-    endTime: normalizeTimeWithSeconds(formData.get("endTime")),
+    startTime: normalizeTimeForApi(formData.get("startTime")),
+    endTime: normalizeTimeForApi(formData.get("endTime")),
     targetType: normalizeNumber(formData.get("targetType")),
     targetValue: normalizeText(formData.get("targetValue")),
   };

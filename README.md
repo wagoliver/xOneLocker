@@ -58,6 +58,6 @@ Definidas em `docker-compose.yml` via `AUTH_USER` e `AUTH_PASSWORD`.
 ## Regras de validacao/UX
 
 - Para recorrencia, `startTime` e `endTime` sao obrigatorios, **nao** sao derivados de `startDate`/`endDate`.
-- `startTime` e `endTime` devem estar no formato `HH:mm:ss` e `endTime` precisa ser maior que `startTime`.
+- `startTime` e `endTime` devem estar no formato `HH:mm` e `endTime` precisa ser maior que `startTime`.
 - Ao salvar um agendamento, a UI aguarda a resposta da API externa; se falhar, o modal permanece aberto e mostra o motivo.
 - Quando o campo `endDate` nao e preenchido, o agendamento **nao expira**.
