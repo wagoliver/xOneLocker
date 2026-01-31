@@ -243,6 +243,16 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS locker_workflows (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      definition JSONB NOT NULL,
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     ALTER TABLE api_tokens
       ADD COLUMN IF NOT EXISTS bearer_token TEXT;
 
@@ -257,6 +267,9 @@ async function migrate() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS locker_schedules_remote_id_idx
       ON locker_schedules (remote_schedule_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS locker_workflows_name_idx
+      ON locker_workflows (name);
   `;
 
   await pool.query(sql);
@@ -442,64 +455,83 @@ async function fetchIntegrationList(path, params = {}) {
     };
   }
 
+  const baseUrl = INTEGRATION_API_BASE_URL || CORE_REGISTRY_BASE_URL;
+  if (!baseUrl) {
+    return {
+      ok: false,
+      status: null,
+      responseText: null,
+      error: "Base URL da Integration API nao configurada",
+      data: [],
+    };
+  }
+
   const headers = {
     Authorization: `Bearer ${tokens.bearer_token}`,
   };
-
-  const baseUrl = INTEGRATION_API_BASE_URL || CORE_REGISTRY_BASE_URL;
   const pageSize = 100;
   let pageNumber = 1;
   let hasNext = true;
   let totalPages = null;
   const data = [];
 
-  while (hasNext && pageNumber <= 50) {
-    const url = new URL(`${baseUrl.replace(/\/$/, "")}${path}`);
-    url.searchParams.set("PageNumber", String(pageNumber));
-    url.searchParams.set("PageSize", String(pageSize));
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== null && value !== undefined && value !== "") {
-        url.searchParams.set(key, String(value));
+  try {
+    while (hasNext && pageNumber <= 50) {
+      const url = new URL(`${baseUrl.replace(/\/$/, "")}${path}`);
+      url.searchParams.set("PageNumber", String(pageNumber));
+      url.searchParams.set("PageSize", String(pageSize));
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== "") {
+          url.searchParams.set(key, String(value));
+        }
+      });
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers,
+      });
+
+      const responseText = await response.text();
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          responseText,
+          error: responseText,
+          data: [],
+        };
       }
-    });
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers,
-    });
+      let parsed = null;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        parsed = null;
+      }
 
-    const responseText = await response.text();
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        responseText,
-        error: responseText,
-        data: [],
-      };
+      const value = parsed?.value || parsed;
+      const pageData = Array.isArray(value?.data) ? value.data : [];
+      data.push(...pageData);
+
+      if (typeof value?.totalPages === "number") {
+        totalPages = value.totalPages;
+        hasNext = pageNumber < totalPages;
+      } else if (typeof value?.hasNextPage === "boolean") {
+        hasNext = value.hasNextPage;
+      } else {
+        hasNext = pageData.length === pageSize;
+      }
+
+      pageNumber += 1;
     }
-
-    let parsed = null;
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      parsed = null;
-    }
-
-    const value = parsed?.value || parsed;
-    const pageData = Array.isArray(value?.data) ? value.data : [];
-    data.push(...pageData);
-
-    if (typeof value?.totalPages === "number") {
-      totalPages = value.totalPages;
-      hasNext = pageNumber < totalPages;
-    } else if (typeof value?.hasNextPage === "boolean") {
-      hasNext = value.hasNextPage;
-    } else {
-      hasNext = pageData.length === pageSize;
-    }
-
-    pageNumber += 1;
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      responseText: null,
+      error: err?.message || "Erro ao chamar Integration API",
+      data: [],
+    };
   }
 
   return {
@@ -963,6 +995,83 @@ app.get("/api/session", async (req, res) => {
     role: req.auth?.role,
     expiresAt: req.auth?.expires_at,
   });
+});
+
+app.post("/api/workflows", async (req, res) => {
+  const name = normalizeOptional(req.body?.name);
+  const definition = req.body?.definition;
+
+  if (!name) {
+    res.status(400).json({ error: "Nome do fluxo obrigatorio" });
+    return;
+  }
+
+  if (!definition || typeof definition !== "object") {
+    res.status(400).json({ error: "Definicao do fluxo obrigatoria" });
+    return;
+  }
+
+  const author = req.auth?.username || null;
+  const result = await pool.query(
+    `
+      INSERT INTO locker_workflows (name, definition, created_by, updated_by)
+      VALUES ($1, $2::jsonb, $3, $3)
+      ON CONFLICT (name)
+      DO UPDATE SET definition = EXCLUDED.definition,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+      RETURNING id, name, created_at, updated_at, created_by, updated_by;
+    `,
+    [name, definition, author]
+  );
+
+  await logAudit({
+    action: "WORKFLOW_SAVE",
+    entityType: "WORKFLOW",
+    entityId: result.rows[0]?.id ?? null,
+    remoteId: null,
+    requestPayload: { name },
+    responseStatus: 200,
+    responseBody: "Workflow salvo",
+    error: null,
+  });
+
+  res.json(result.rows[0]);
+});
+
+app.get("/api/workflows", async (req, res) => {
+  const limit = normalizeNumber(req.query?.limit) || 100;
+  const result = await pool.query(
+    `
+      SELECT id, name, created_by, updated_by, created_at, updated_at
+      FROM locker_workflows
+      ORDER BY updated_at DESC
+      LIMIT $1;
+    `,
+    [limit]
+  );
+  res.json(result.rows);
+});
+
+app.get("/api/workflows/:id", async (req, res) => {
+  const id = normalizeNumber(req.params?.id);
+  if (!id) {
+    res.status(400).json({ error: "Id invalido" });
+    return;
+  }
+  const result = await pool.query(
+    `
+      SELECT id, name, definition, created_by, updated_by, created_at, updated_at
+      FROM locker_workflows
+      WHERE id = $1;
+    `,
+    [id]
+  );
+  if (result.rowCount === 0) {
+    res.status(404).json({ error: "Fluxo nao encontrado" });
+    return;
+  }
+  res.json(result.rows[0]);
 });
 
 app.post("/api/register", async (req, res) => {

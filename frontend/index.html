@@ -31,6 +31,7 @@
         <div class="nav-actions">
           <nav class="nav">
             <button class="nav-btn is-active" data-view="control">Controle</button>
+            <button class="nav-btn" data-view="workflow">Workflow</button>
             <button class="nav-btn" data-view="records">Registros API</button>
             <button class="nav-btn" data-view="audit">Auditoria</button>
             <button class="nav-btn admin-only" data-view="users">Usuarios</button>
@@ -165,6 +166,45 @@
           <div id="control-feedback" class="feedback"></div>
           <div id="control-visual" class="control-list"></div>
           <div id="control-table" class="table-card"></div>
+        </section>
+
+        <section id="view-workflow" class="view">
+          <div class="toolbar">
+            <div>
+              <h1>Workflow</h1>
+              <p class="muted">Arraste blocos para montar o fluxo de bloqueio.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="workflow-clear" class="ghost">Limpar</button>
+              <button id="workflow-load" class="ghost">Carregar</button>
+              <button id="workflow-save" class="ghost">Salvar</button>
+              <button id="workflow-run" class="primary">Executar fluxo</button>
+            </div>
+          </div>
+          <div id="workflow-status" class="feedback"></div>
+          <div class="workflow-layout">
+            <aside class="workflow-palette">
+              <div class="palette-header">
+                <h3>Blocos</h3>
+                <p class="muted">Arraste ou clique para adicionar.</p>
+              </div>
+              <div id="workflow-bricks" class="brick-list"></div>
+            </aside>
+            <section id="workflow-canvas" class="workflow-canvas">
+              <div id="workflow-empty" class="workflow-empty">
+                Arraste um bloco para iniciar o fluxo.
+              </div>
+              <svg id="workflow-edges" class="workflow-edges"></svg>
+              <div id="workflow-nodes" class="workflow-nodes"></div>
+            </section>
+            <aside class="workflow-inspector">
+              <div class="inspector-header">
+                <h3>Propriedades</h3>
+                <p class="muted">Selecione um bloco para configurar.</p>
+              </div>
+              <div id="workflow-inspector-body" class="inspector-body"></div>
+            </aside>
+          </div>
         </section>
 
         <section id="view-rule-form" class="view">
@@ -456,6 +496,104 @@
       <button type="button" class="context-item is-danger" data-action="delete">
         Excluir
       </button>
+    </div>
+
+    <div id="workflow-menu" class="context-menu">
+      <button type="button" class="context-item" data-action="properties">
+        Propriedades
+      </button>
+      <button type="button" class="context-item" data-action="run">
+        Executar
+      </button>
+      <button type="button" class="context-item" data-action="view-response">
+        Ver retorno
+      </button>
+      <button type="button" class="context-item" data-action="refresh-table">
+        Atualizar tabela
+      </button>
+      <button type="button" class="context-item" data-action="view-table">
+        Ver tabela
+      </button>
+      <button type="button" class="context-item is-danger" data-action="delete">
+        Excluir
+      </button>
+    </div>
+
+    <div id="workflow-edge-menu" class="context-menu">
+      <button type="button" class="context-item is-danger" data-action="delete-edge">
+        Excluir ligacao
+      </button>
+    </div>
+
+    <div id="workflow-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="workflow-modal-title">Propriedades</h2>
+          <button id="workflow-modal-close" class="ghost">Fechar</button>
+        </div>
+        <div id="workflow-modal-body" class="inspector-body"></div>
+      </div>
+    </div>
+
+    <div id="workflow-response-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="workflow-response-title">Retorno</h2>
+          <button id="workflow-response-close" class="ghost">Fechar</button>
+        </div>
+        <div id="workflow-response-body" class="modal-content"></div>
+      </div>
+    </div>
+
+    <div id="workflow-table-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="workflow-table-title">Tabela</h2>
+          <button id="workflow-table-close" class="ghost">Fechar</button>
+        </div>
+        <div id="workflow-table-body" class="modal-content"></div>
+      </div>
+    </div>
+
+    <div id="workflow-save-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>Salvar fluxo</h2>
+          <button id="workflow-save-close" class="ghost">Fechar</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            Nome do fluxo
+            <input
+              id="workflow-save-name"
+              type="text"
+              maxlength="120"
+              placeholder="Ex: Fluxo de bloqueio por departamento"
+              autocomplete="off"
+            />
+          </label>
+        </div>
+        <div id="workflow-save-feedback" class="feedback"></div>
+        <div class="actions confirm-actions">
+          <button id="workflow-save-cancel" class="ghost">Cancelar</button>
+          <button id="workflow-save-confirm" class="primary">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="workflow-load-modal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>Carregar fluxo</h2>
+          <button id="workflow-load-close" class="ghost">Fechar</button>
+        </div>
+        <div id="workflow-load-body" class="table-card"></div>
+        <div id="workflow-load-feedback" class="feedback"></div>
+        <div class="actions confirm-actions">
+          <button id="workflow-load-refresh" class="ghost">Atualizar</button>
+          <button id="workflow-load-cancel" class="primary">Fechar</button>
+        </div>
+      </div>
     </div>
 
     <script src="app.js"></script>

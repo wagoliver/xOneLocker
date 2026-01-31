@@ -2,6 +2,7 @@ const views = {
   login: document.getElementById("view-login"),
   register: document.getElementById("view-register"),
   control: document.getElementById("view-control"),
+  workflow: document.getElementById("view-workflow"),
   ruleForm: document.getElementById("view-rule-form"),
   audit: document.getElementById("view-audit"),
   records: document.getElementById("view-records"),
@@ -87,6 +88,43 @@ const registerForm = document.getElementById("register-form");
 const registerFeedback = document.getElementById("register-feedback");
 const goRegisterButton = document.getElementById("go-register");
 const goLoginButton = document.getElementById("go-login");
+const workflowPalette = document.getElementById("workflow-bricks");
+const workflowCanvas = document.getElementById("workflow-canvas");
+const workflowNodesLayer = document.getElementById("workflow-nodes");
+const workflowEdgesLayer = document.getElementById("workflow-edges");
+const workflowInspectorBody = document.getElementById("workflow-inspector-body");
+const workflowMenu = document.getElementById("workflow-menu");
+const workflowEdgeMenu = document.getElementById("workflow-edge-menu");
+const workflowModal = document.getElementById("workflow-modal");
+const workflowModalBody = document.getElementById("workflow-modal-body");
+const workflowModalClose = document.getElementById("workflow-modal-close");
+const workflowModalTitle = document.getElementById("workflow-modal-title");
+const workflowResponseModal = document.getElementById("workflow-response-modal");
+const workflowResponseBody = document.getElementById("workflow-response-body");
+const workflowResponseClose = document.getElementById("workflow-response-close");
+const workflowResponseTitle = document.getElementById("workflow-response-title");
+const workflowTableModal = document.getElementById("workflow-table-modal");
+const workflowTableBody = document.getElementById("workflow-table-body");
+const workflowTableClose = document.getElementById("workflow-table-close");
+const workflowTableTitle = document.getElementById("workflow-table-title");
+const workflowLoadButton = document.getElementById("workflow-load");
+const workflowLoadModal = document.getElementById("workflow-load-modal");
+const workflowLoadBody = document.getElementById("workflow-load-body");
+const workflowLoadClose = document.getElementById("workflow-load-close");
+const workflowLoadCancel = document.getElementById("workflow-load-cancel");
+const workflowLoadRefresh = document.getElementById("workflow-load-refresh");
+const workflowLoadFeedback = document.getElementById("workflow-load-feedback");
+const workflowSaveModal = document.getElementById("workflow-save-modal");
+const workflowSaveName = document.getElementById("workflow-save-name");
+const workflowSaveClose = document.getElementById("workflow-save-close");
+const workflowSaveCancel = document.getElementById("workflow-save-cancel");
+const workflowSaveConfirm = document.getElementById("workflow-save-confirm");
+const workflowSaveFeedback = document.getElementById("workflow-save-feedback");
+const workflowStatus = document.getElementById("workflow-status");
+const workflowClearButton = document.getElementById("workflow-clear");
+const workflowSaveButton = document.getElementById("workflow-save");
+const workflowRunButton = document.getElementById("workflow-run");
+const workflowEmpty = document.getElementById("workflow-empty");
 
 let editingId = null;
 const scheduleCache = new Map();
@@ -110,6 +148,25 @@ const controlFilters = {
 };
 let confirmResolver = null;
 let scheduleContext = null;
+const WORKFLOW_STORAGE_KEY = "locker-workflow-draft";
+const WORKFLOW_NAME_KEY = "locker-workflow-name";
+const workflowState = {
+  nodes: [],
+  edges: [],
+  selectedNodeId: null,
+  connectingFrom: null,
+  connectingPosition: null,
+  loaded: false,
+};
+let workflowEdgesRaf = null;
+let workflowConnectingHoverPort = null;
+let workflowMenuNodeId = null;
+let workflowMenuEdge = null;
+let workflowModalNodeId = null;
+let workflowResponseNodeId = null;
+let workflowTableNodeId = null;
+const WORKFLOW_RESULT_LIMIT = 60000;
+const WORKFLOW_DEFAULT_OUTPUT_PATH = "data.item";
 
 function showView(viewName) {
   Object.values(views).forEach((view) => {
@@ -126,8 +183,16 @@ function showView(viewName) {
     "login-active",
     viewName === "login" || viewName === "register"
   );
+  document.body.classList.toggle("workflow-active", viewName === "workflow");
 
   closeControlMenu();
+  closeWorkflowMenu();
+  closeWorkflowEdgeMenu();
+  closeWorkflowModal();
+  closeWorkflowResponseModal();
+  closeWorkflowTableModal();
+  closeWorkflowLoadModal();
+  closeWorkflowSaveModal();
   closeConfirmModal(false);
 }
 
@@ -210,6 +275,3278 @@ async function apiFetch(url, options = {}) {
     }
     return response;
   }
+}
+
+const WORKFLOW_BRICKS = [
+  {
+    type: "start",
+    title: "Inicio",
+    subtitle: "Ponto de inicio do fluxo",
+    group: "Fluxo",
+    summary: () => "Inicio",
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Inicio",
+      },
+    ],
+  },
+  {
+    type: "filter",
+    title: "Filtro",
+    subtitle: "Aplica regras no data.item",
+    group: "Transformacao",
+    summary: (node) => {
+      const count = Array.isArray(node.config?.conditions)
+        ? node.config.conditions.length
+        : 0;
+      const logic = node.config?.logic || "AND";
+      return count ? `Regras: ${count} (${logic})` : "Sem regras";
+    },
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Filtrar ativos",
+      },
+      {
+        key: "logic",
+        label: "Logica",
+        type: "select",
+        options: [
+          { value: "AND", label: "AND" },
+          { value: "OR", label: "OR" },
+        ],
+        default: "AND",
+      },
+      {
+        key: "conditions",
+        label: "Condicoes",
+        type: "conditions",
+      },
+    ],
+  },
+  {
+    type: "block",
+    title: "Bloqueio",
+    subtitle: "Gera lista de bloqueio a partir do data.item",
+    group: "Acao",
+    summary: (node) => {
+      const actionLabel = Number(node.config?.actionType ?? 0) === 1
+        ? "Desbloquear"
+        : "Bloquear";
+      const targetLabel = Number(node.config?.targetType ?? 0) === 1
+        ? "Hostname"
+        : "Usuario";
+      const targets = node.output?.data?.item?.targets;
+      const count = Array.isArray(targets) ? targets.length : 0;
+      return count ? `${actionLabel} ${targetLabel}: ${count}` : `${actionLabel} ${targetLabel}`;
+    },
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Bloquear usuarios",
+      },
+      {
+        key: "actionType",
+        label: "Acao",
+        type: "select",
+        options: [
+          { value: "0", label: "Bloquear" },
+          { value: "1", label: "Desbloquear" },
+        ],
+        default: "0",
+      },
+      {
+        key: "targetType",
+        label: "Alvo",
+        type: "select",
+        options: [
+          { value: "0", label: "Usuario" },
+          { value: "1", label: "Hostname" },
+        ],
+        default: "0",
+      },
+      {
+        key: "sourceMode",
+        label: "Origem dos alvos",
+        type: "select",
+        options: [
+          { value: "data", label: "Data.item" },
+          { value: "manual", label: "Lista manual" },
+        ],
+        default: "data",
+      },
+      {
+        key: "sourcePath",
+        label: "Caminho no data.item",
+        type: "text",
+        placeholder: "ex: data.items (opcional)",
+        dependsOn: { key: "sourceMode", values: ["data"] },
+      },
+      {
+        key: "valuePath",
+        label: "Campo do item",
+        type: "text",
+        placeholder: "ex: username / hostname",
+        dependsOn: { key: "sourceMode", values: ["data"] },
+      },
+      {
+        key: "manualTargets",
+        label: "Lista manual (um por linha)",
+        type: "textarea",
+        placeholder: "usuario1\nusuario2\nusuario3",
+        dependsOn: { key: "sourceMode", values: ["manual"] },
+      },
+      {
+        key: "message",
+        label: "Mensagem",
+        type: "text",
+        placeholder: "Ex: Agendamento de bloqueio",
+      },
+      {
+        key: "scheduleType",
+        label: "Tipo de agendamento",
+        type: "select",
+        options: [
+          { value: "0", label: "Once" },
+          { value: "1", label: "Recorrente" },
+        ],
+        default: "0",
+      },
+      {
+        key: "startDate",
+        label: "Inicio",
+        type: "datetime",
+      },
+      {
+        key: "endDate",
+        label: "Fim",
+        type: "datetime",
+      },
+      {
+        key: "recurrenceType",
+        label: "Recorrencia",
+        type: "select",
+        options: [
+          { value: "", label: "Selecione" },
+          { value: "0", label: "Daily" },
+          { value: "1", label: "Weekly" },
+          { value: "2", label: "Monthly" },
+        ],
+        default: "",
+        dependsOn: { key: "scheduleType", values: ["1"] },
+      },
+      {
+        key: "daysOfWeek",
+        label: "Dias da semana (0=Dom)",
+        type: "text",
+        placeholder: "0,1,2",
+        dependsOn: { key: "scheduleType", values: ["1"] },
+      },
+      {
+        key: "startTime",
+        label: "Hora inicial",
+        type: "time",
+        dependsOn: { key: "scheduleType", values: ["1"] },
+      },
+      {
+        key: "endTime",
+        label: "Hora final",
+        type: "time",
+        dependsOn: { key: "scheduleType", values: ["1"] },
+      },
+      {
+        key: "dedupe",
+        label: "Remover duplicados",
+        type: "select",
+        options: [
+          { value: "yes", label: "Sim" },
+          { value: "no", label: "Nao" },
+        ],
+        default: "yes",
+      },
+    ],
+  },
+  {
+    type: "webhook",
+    title: "Webhook HTTP",
+    subtitle: "GET/POST/DELETE para integracoes",
+    group: "Integracao",
+    summary: (node) => {
+      const method = node.config?.method || "GET";
+      const url = node.config?.url || "";
+      const authType = node.config?.authType || "none";
+      const authLabel =
+        authType === "bearer"
+          ? "Bearer"
+          : authType === "apiKey"
+            ? "API Key"
+            : "Sem auth";
+      if (!url) return `${method} - ${authLabel}`;
+      return `${method} ${url} - ${authLabel}`;
+    },
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Buscar colaboradores",
+      },
+      {
+        key: "method",
+        label: "Metodo",
+        type: "select",
+        options: [
+          { value: "GET", label: "GET" },
+          { value: "POST", label: "POST" },
+          { value: "PUT", label: "PUT" },
+          { value: "PATCH", label: "PATCH" },
+          { value: "DELETE", label: "DELETE" },
+        ],
+        default: "GET",
+      },
+      {
+        key: "url",
+        label: "URL",
+        type: "text",
+        placeholder: "https://api.exemplo.com/endpoint",
+      },
+      {
+        key: "authType",
+        label: "Autenticacao",
+        type: "select",
+        options: [
+          { value: "none", label: "Nenhuma" },
+          { value: "bearer", label: "Bearer Token" },
+          { value: "apiKey", label: "API Key" },
+        ],
+        default: "none",
+      },
+      {
+        key: "authToken",
+        label: "Bearer token",
+        type: "text",
+        placeholder: "Cole o token",
+        excludeFromSummary: true,
+        dependsOn: { key: "authType", values: ["bearer"] },
+      },
+      {
+        key: "apiKeyHeader",
+        label: "Header da API Key",
+        type: "text",
+        placeholder: "x-api-key",
+        excludeFromSummary: true,
+        dependsOn: { key: "authType", values: ["apiKey"] },
+      },
+      {
+        key: "apiKeyValue",
+        label: "Valor da API Key",
+        type: "text",
+        placeholder: "Chave secreta",
+        excludeFromSummary: true,
+        dependsOn: { key: "authType", values: ["apiKey"] },
+      },
+      {
+        key: "queryParams",
+        label: "Query params",
+        type: "textarea",
+        placeholder: "chave=valor\nstatus=ativo",
+        excludeFromSummary: true,
+      },
+      {
+        key: "headers",
+        label: "Headers",
+        type: "textarea",
+        placeholder: "x-tenant: demo\nx-trace-id: 123",
+        excludeFromSummary: true,
+      },
+      {
+        key: "bodyType",
+        label: "Tipo de body",
+        type: "select",
+        options: [
+          { value: "none", label: "Sem body" },
+          { value: "json", label: "JSON" },
+          { value: "text", label: "Texto" },
+          { value: "form", label: "Form URL Encoded" },
+        ],
+        default: "none",
+      },
+      {
+        key: "body",
+        label: "Payload",
+        type: "textarea",
+        placeholder: "{\n  \"id\": 123\n}",
+        excludeFromSummary: true,
+        dependsOn: { key: "bodyType", values: ["json", "text", "form"] },
+      },
+      {
+        key: "responsePath",
+        label: "Caminho da resposta",
+        type: "text",
+        placeholder: "ex: data.items (opcional)",
+      },
+    ],
+  },
+  {
+    type: "table",
+    title: "Tabela",
+    subtitle: "Visualiza retorno em tabela",
+    group: "Visualizacao",
+    summary: (node) => {
+      const rows = node.tableData?.rows?.length || 0;
+      return rows ? `Linhas: ${rows}` : "Sem dados";
+    },
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Tabela de colaboradores",
+      },
+      {
+        key: "maxRows",
+        label: "Limite de linhas",
+        type: "number",
+        placeholder: "25",
+      },
+    ],
+  },
+];
+
+const WORKFLOW_BRICK_TYPES = new Set(WORKFLOW_BRICKS.map((brick) => brick.type));
+
+function getWorkflowBrick(type) {
+  return WORKFLOW_BRICKS.find((brick) => brick.type === type);
+}
+
+function setWorkflowStatus(message, tone) {
+  if (!workflowStatus) return;
+  workflowStatus.textContent = message || "";
+  workflowStatus.className = "feedback";
+  if (tone === "error") workflowStatus.classList.add("is-error");
+  if (tone === "success") workflowStatus.classList.add("is-success");
+  if (tone === "warning") workflowStatus.classList.add("is-warning");
+}
+
+function snapToGrid(value) {
+  const grid = 24;
+  return Math.round(value / grid) * grid;
+}
+
+function loadWorkflowState() {
+  if (workflowState.loaded) return;
+  workflowState.loaded = true;
+  const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.nodes)) {
+      workflowState.nodes = parsed.nodes
+        .filter((node) => WORKFLOW_BRICK_TYPES.has(node?.type))
+        .map((node, index) => {
+          const hasPosition =
+            typeof node?.position?.x === "number" &&
+            typeof node?.position?.y === "number";
+          return {
+            ...node,
+            config: node?.config || {},
+            position: hasPosition
+              ? node.position
+              : { x: 40 + index * 24, y: 40 + index * 24 },
+          };
+        });
+    }
+    if (Array.isArray(parsed?.edges)) {
+      const validIds = new Set(workflowState.nodes.map((node) => node.id));
+      workflowState.edges = parsed.edges.filter(
+        (edge) => edge?.from && edge?.to && validIds.has(edge.from) && validIds.has(edge.to)
+      );
+    }
+    workflowState.selectedNodeId = parsed?.selectedNodeId || null;
+  } catch {
+    workflowState.nodes = [];
+    workflowState.edges = [];
+  }
+}
+
+function saveWorkflowState() {
+  if (!workflowState.loaded) return;
+  const payload = {
+    nodes: workflowState.nodes,
+    edges: workflowState.edges,
+    selectedNodeId: workflowState.selectedNodeId,
+  };
+  window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function serializeWorkflowDefinition() {
+  const nodes = workflowState.nodes.map((node) => {
+    const {
+      output,
+      outputUpdatedAt,
+      execStatus,
+      execStatusAt,
+      tableData,
+      lastResult,
+      lastRunAt,
+      ...rest
+    } = node;
+    return rest;
+  });
+  return {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    nodes,
+    edges: workflowState.edges,
+  };
+}
+
+function downloadWorkflowJson() {
+  const payload = serializeWorkflowDefinition();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  link.href = url;
+  link.download = `workflow-${stamp}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function saveWorkflowToServer(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) {
+    if (workflowSaveFeedback) {
+      workflowSaveFeedback.textContent = "Informe um nome para o fluxo.";
+      workflowSaveFeedback.className = "feedback is-warning";
+    }
+    return;
+  }
+
+  const payload = {
+    name: trimmed,
+    definition: serializeWorkflowDefinition(),
+  };
+
+  if (workflowSaveFeedback) {
+    workflowSaveFeedback.textContent = "Salvando fluxo...";
+    workflowSaveFeedback.className = "feedback";
+  }
+
+  try {
+    const response = await apiFetch("/api/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (workflowSaveFeedback) {
+        workflowSaveFeedback.textContent =
+          errorText || "Falha ao salvar o fluxo.";
+        workflowSaveFeedback.className = "feedback is-error";
+      }
+      return;
+    }
+
+    window.localStorage.setItem(WORKFLOW_NAME_KEY, trimmed);
+    if (workflowSaveFeedback) {
+      workflowSaveFeedback.textContent = "Fluxo salvo.";
+      workflowSaveFeedback.className = "feedback is-success";
+    }
+    setWorkflowStatus("Fluxo salvo no banco.", "success");
+    closeWorkflowSaveModal();
+  } catch (err) {
+    if (workflowSaveFeedback) {
+      workflowSaveFeedback.textContent =
+        err?.message || "Falha ao salvar o fluxo.";
+      workflowSaveFeedback.className = "feedback is-error";
+    }
+  }
+}
+
+function applyWorkflowDefinition(definition, name) {
+  const parsed = definition || {};
+  if (!Array.isArray(parsed.nodes)) {
+    if (workflowLoadFeedback) {
+      workflowLoadFeedback.textContent = "Fluxo invalido.";
+      workflowLoadFeedback.className = "feedback is-error";
+    }
+    return;
+  }
+
+  workflowState.nodes = parsed.nodes
+    .filter((node) => WORKFLOW_BRICK_TYPES.has(node?.type))
+    .map((node, index) => {
+      const hasPosition =
+        typeof node?.position?.x === "number" &&
+        typeof node?.position?.y === "number";
+      return {
+        ...node,
+        config: node?.config || {},
+        position: hasPosition
+          ? node.position
+          : { x: 40 + index * 24, y: 40 + index * 24 },
+      };
+    });
+
+  const validIds = new Set(workflowState.nodes.map((node) => node.id));
+  workflowState.edges = Array.isArray(parsed.edges)
+    ? parsed.edges.filter(
+        (edge) => edge?.from && edge?.to && validIds.has(edge.from) && validIds.has(edge.to)
+      )
+    : [];
+
+  workflowState.selectedNodeId = null;
+  workflowState.connectingFrom = null;
+  workflowState.connectingPosition = null;
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  setWorkflowStatus(
+    name ? `Fluxo "${name}" carregado.` : "Fluxo carregado.",
+    "success"
+  );
+  closeWorkflowLoadModal();
+}
+
+function formatWorkflowDate(value) {
+  if (!value) return "";
+  try {
+    const date = new Date(value);
+    return date.toLocaleString("pt-BR");
+  } catch {
+    return String(value);
+  }
+}
+
+function renderWorkflowList(items) {
+  if (!workflowLoadBody) return;
+  workflowLoadBody.innerHTML = "";
+  if (!items.length) {
+    workflowLoadBody.textContent = "Nenhum fluxo salvo.";
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "table";
+  const thead = document.createElement("thead");
+  thead.innerHTML = `
+    <tr>
+      <th>Nome</th>
+      <th>Atualizado</th>
+      <th>Criado por</th>
+      <th></th>
+    </tr>
+  `;
+  const tbody = document.createElement("tbody");
+
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    const createdBy = item.created_by || "-";
+    row.innerHTML = `
+      <td>${item.name}</td>
+      <td>${formatWorkflowDate(item.updated_at)}</td>
+      <td>${createdBy}</td>
+      <td><button class="ghost" data-action="load" data-id="${item.id}">Carregar</button></td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  table.append(thead, tbody);
+  workflowLoadBody.append(table);
+}
+
+async function fetchWorkflowList() {
+  if (!workflowLoadBody) return;
+  workflowLoadBody.textContent = "Carregando...";
+  if (workflowLoadFeedback) workflowLoadFeedback.textContent = "";
+  try {
+    const response = await apiFetch("/api/workflows");
+    if (!response.ok) {
+      workflowLoadBody.textContent = "";
+      if (workflowLoadFeedback) {
+        workflowLoadFeedback.textContent = "Falha ao listar fluxos.";
+        workflowLoadFeedback.className = "feedback is-error";
+      }
+      return;
+    }
+    const data = await response.json();
+    renderWorkflowList(Array.isArray(data) ? data : []);
+  } catch (err) {
+    workflowLoadBody.textContent = "";
+    if (workflowLoadFeedback) {
+      workflowLoadFeedback.textContent =
+        err?.message || "Falha ao listar fluxos.";
+      workflowLoadFeedback.className = "feedback is-error";
+    }
+  }
+}
+
+async function loadWorkflowFromServer(id) {
+  const workflowId = Number(id);
+  if (!workflowId) return;
+  if (workflowLoadFeedback) {
+    workflowLoadFeedback.textContent = "Carregando fluxo...";
+    workflowLoadFeedback.className = "feedback";
+  }
+  try {
+    const response = await apiFetch(`/api/workflows/${workflowId}`);
+    if (!response.ok) {
+      const text = await response.text();
+      if (workflowLoadFeedback) {
+        workflowLoadFeedback.textContent = text || "Falha ao carregar fluxo.";
+        workflowLoadFeedback.className = "feedback is-error";
+      }
+      return;
+    }
+    const data = await response.json();
+    if (data?.name) {
+      window.localStorage.setItem(WORKFLOW_NAME_KEY, data.name);
+    }
+    applyWorkflowDefinition(data?.definition, data?.name);
+  } catch (err) {
+    if (workflowLoadFeedback) {
+      workflowLoadFeedback.textContent =
+        err?.message || "Falha ao carregar fluxo.";
+      workflowLoadFeedback.className = "feedback is-error";
+    }
+  }
+}
+
+function getDefaultNodePosition() {
+  if (!workflowCanvas) return { x: 40, y: 40 };
+  const rect = workflowCanvas.getBoundingClientRect();
+  const baseX = rect.width ? rect.width / 2 - 120 : 40;
+  const baseY = rect.height ? rect.height / 2 - 40 : 40;
+  const offset = (workflowState.nodes.length % 6) * 18;
+  return {
+    x: snapToGrid(Math.max(16, baseX + offset)),
+    y: snapToGrid(Math.max(16, baseY + offset)),
+  };
+}
+
+function getDropPosition(event) {
+  if (!workflowCanvas) return { x: 40, y: 40 };
+  const rect = workflowCanvas.getBoundingClientRect();
+  const rawX = event.clientX - rect.left - 120;
+  const rawY = event.clientY - rect.top - 30;
+  return {
+    x: snapToGrid(Math.max(16, rawX)),
+    y: snapToGrid(Math.max(16, rawY)),
+  };
+}
+
+function createWorkflowNode(type, position) {
+  const def = getWorkflowBrick(type);
+  if (!def) return;
+  if (type === "start") {
+    const existing = workflowState.nodes.find((node) => node.type === "start");
+    if (existing) {
+      selectWorkflowNode(existing.id);
+      setWorkflowStatus("So e permitido um bloco Inicio.", "warning");
+      return;
+    }
+  }
+  const node = {
+    id: `node-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type,
+    title: def.title,
+    position: position || getDefaultNodePosition(),
+    config: {},
+  };
+  if (Array.isArray(def.fields)) {
+    def.fields.forEach((field) => {
+      if (field.default !== undefined) {
+        node.config[field.key] = field.default;
+      }
+    });
+  }
+  workflowState.nodes.push(node);
+  workflowState.selectedNodeId = node.id;
+  workflowState.connectingFrom = null;
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+}
+
+function getFieldDisplayValue(field, value) {
+  if (field.type === "select") {
+    const option = field.options?.find(
+      (item) => String(item.value) === String(value)
+    );
+    return option?.label || value;
+  }
+  return value;
+}
+
+function describeNodeConfig(node) {
+  const def = getWorkflowBrick(node.type);
+  if (!def?.fields?.length) return "Sem configuracao";
+  if (typeof def.summary === "function") {
+    return def.summary(node);
+  }
+  const entries = def.fields
+    .map((field) => {
+      if (field.excludeFromSummary) return null;
+      const value = node.config?.[field.key];
+      if (value === undefined || value === null || value === "") return null;
+      if (field.type === "textarea") {
+        return `${field.label}: definido`;
+      }
+      const display = getFieldDisplayValue(field, value);
+      return `${field.label}: ${display}`;
+    })
+    .filter(Boolean);
+  return entries.length ? entries.join(" - ") : "Sem configuracao";
+}
+
+function getNodeDisplayName(node, defOverride) {
+  if (!node) return "";
+  const def = defOverride || getWorkflowBrick(node.type);
+  const customName = node.config?.name ? String(node.config.name).trim() : "";
+  return customName || def?.title || node.title || node.type;
+}
+
+function normalizeConditionRow(row) {
+  return {
+    field: row?.field ?? "",
+    operator: row?.operator ?? "==",
+    value: row?.value ?? "",
+  };
+}
+
+function ensureFilterConditions(node) {
+  if (!node.config) node.config = {};
+  if (!Array.isArray(node.config.conditions)) {
+    node.config.conditions = [normalizeConditionRow({})];
+  } else if (node.config.conditions.length === 0) {
+    node.config.conditions = [normalizeConditionRow({})];
+  }
+}
+
+function coerceValue(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  if (trimmed.toLowerCase() === "true") return true;
+  if (trimmed.toLowerCase() === "false") return false;
+  if (trimmed.toLowerCase() === "null") return null;
+  const num = Number(trimmed);
+  if (!Number.isNaN(num) && String(num) === trimmed) return num;
+  return trimmed;
+}
+
+function compareValues(left, operator, right) {
+  const leftValue = coerceValue(left);
+  const rightValue = coerceValue(right);
+
+  if (operator === "contains" || operator === "not contains") {
+    let result = false;
+    if (Array.isArray(leftValue)) {
+      result = leftValue.includes(rightValue);
+    } else if (typeof leftValue === "string") {
+      result = leftValue.includes(String(rightValue ?? ""));
+    }
+    return operator === "contains" ? result : !result;
+  }
+
+  if (operator === ">=" || operator === "<=") {
+    if (typeof leftValue !== "number" || typeof rightValue !== "number") {
+      return false;
+    }
+    return operator === ">=" ? leftValue >= rightValue : leftValue <= rightValue;
+  }
+
+  if (operator === "==" || operator === "!=") {
+    const areEqual =
+      typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue === rightValue
+        : String(leftValue ?? "") === String(rightValue ?? "");
+    return operator === "==" ? areEqual : !areEqual;
+  }
+
+  return false;
+}
+
+function evaluateFilterConditions(item, conditions, logic) {
+  if (!conditions.length) return true;
+  const checks = conditions.map((cond) => {
+    if (!cond.field) {
+      return false;
+    }
+    const currentValue = getValueByPath(item, cond.field);
+    return compareValues(currentValue, cond.operator, cond.value);
+  });
+  return logic === "OR" ? checks.some(Boolean) : checks.every(Boolean);
+}
+
+function applyFilterToItem(item, conditions, logic) {
+  if (Array.isArray(item)) {
+    return item.filter((entry) => evaluateFilterConditions(entry, conditions, logic));
+  }
+  if (item && typeof item === "object") {
+    return evaluateFilterConditions(item, conditions, logic) ? item : null;
+  }
+  return evaluateFilterConditions({ value: item }, conditions, logic) ? item : null;
+}
+
+function isFilterableItem(item) {
+  if (Array.isArray(item)) return true;
+  if (item && typeof item === "object") return true;
+  return false;
+}
+
+function normalizeTargetValue(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function getBlockSourceItem(item, config) {
+  const path = String(config?.sourcePath || "").trim();
+  if (!path) return item;
+  return getValueByPath(item, path);
+}
+
+function getTargetValueFromEntry(entry, config) {
+  if (isPrimitive(entry)) {
+    return entry;
+  }
+  if (!entry || typeof entry !== "object") return null;
+  const valuePath = String(config?.valuePath || "").trim();
+  if (valuePath) {
+    return getValueByPath(entry, valuePath);
+  }
+  const targetType = Number(config?.targetType ?? 0);
+  if (targetType === 1) {
+    return (
+      entry.hostname ??
+      entry.host ??
+      entry.machine ??
+      entry.computer ??
+      null
+    );
+  }
+  return (
+    entry.username ??
+    entry.user ??
+    entry.login ??
+    entry.email ??
+    null
+  );
+}
+
+function buildBlockTargets(source, config) {
+  const list = Array.isArray(source) ? source : [source];
+  const targets = [];
+  list.forEach((entry) => {
+    const value = getTargetValueFromEntry(entry, config);
+    const normalized = normalizeTargetValue(value);
+    if (normalized) targets.push(normalized);
+  });
+  const unique =
+    String(config?.dedupe || "yes") === "no"
+      ? targets
+      : Array.from(new Set(targets));
+  return unique;
+}
+
+function parseManualTargets(value) {
+  if (!value) return [];
+  const raw = String(value).trim();
+  if (!raw) return [];
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      // fallback to line parsing
+    }
+  }
+  return raw
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseDaysOfWeek(value) {
+  if (!value) return [];
+  const raw = String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const days = raw
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item >= 0 && item <= 6);
+  return Array.from(new Set(days));
+}
+
+function buildBlockSchedulePayload(config, targetValue) {
+  const actionType = normalizeNumber(config?.actionType) ?? 0;
+  const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
+  const startDate = normalizeDateTime(config?.startDate);
+  const endDate = normalizeDateTime(config?.endDate);
+  const recurrenceType = normalizeNumber(config?.recurrenceType);
+  const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
+  const startTime = normalizeTimeForApi(config?.startTime);
+  const endTime = normalizeTimeForApi(config?.endTime);
+  const targetType = normalizeNumber(config?.targetType) ?? 0;
+  const message =
+    normalizeText(config?.message) ||
+    (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+  const normalizedTarget = normalizeText(targetValue);
+
+  if (
+    !message ||
+    actionType === null ||
+    scheduleType === null ||
+    !startDate ||
+    !endDate ||
+    targetType === null ||
+    !normalizedTarget
+  ) {
+    return {
+      error:
+        "Campos obrigatorios: mensagem, acao, tipo, inicio, fim e alvo.",
+    };
+  }
+
+  if (scheduleType === 1 && recurrenceType === null) {
+    return { error: "Recorrencia e obrigatoria." };
+  }
+
+  if (scheduleType === 1 && recurrenceType === 1 && daysOfWeek.length === 0) {
+    return { error: "Selecione pelo menos um dia da semana." };
+  }
+
+  if (scheduleType === 1 && (!startTime || !endTime)) {
+    return { error: "Hora inicial e final sao obrigatorias." };
+  }
+
+  if (scheduleType === 1) {
+    const startSeconds = timeToSeconds(startTime);
+    const endSeconds = timeToSeconds(endTime);
+    if (
+      startSeconds !== null &&
+      endSeconds !== null &&
+      endSeconds <= startSeconds
+    ) {
+      return { error: "Hora final deve ser maior que hora inicial." };
+    }
+  }
+
+  return {
+    payload: {
+      message,
+      actionType,
+      scheduleType,
+      startDate,
+      endDate,
+      recurrenceType: scheduleType === 1 ? recurrenceType : null,
+      daysOfWeek: scheduleType === 1 && daysOfWeek.length ? daysOfWeek : null,
+      startTime: scheduleType === 1 ? startTime : null,
+      endTime: scheduleType === 1 ? endTime : null,
+      targetType,
+      targetValue: normalizedTarget,
+    },
+  };
+}
+
+function getBlockDisplayTargets(node) {
+  const outputTargets = node?.output?.data?.item?.targets;
+  if (Array.isArray(outputTargets) && outputTargets.length) return outputTargets;
+  const resultTargets = node?.lastResult?.targets;
+  if (Array.isArray(resultTargets) && resultTargets.length) return resultTargets;
+  if (node?.config?.sourceMode === "manual") {
+    const manualTargets = parseManualTargets(node?.config?.manualTargets);
+    if (manualTargets.length) return manualTargets;
+  }
+  return [];
+}
+
+function applyWorkflowSelectionStyles(nodeId) {
+  if (!workflowNodesLayer) return;
+  workflowNodesLayer.querySelectorAll(".workflow-node").forEach((el) => {
+    el.classList.toggle("is-selected", el.dataset.nodeId === nodeId);
+  });
+}
+
+function selectWorkflowNode(nodeId, options = {}) {
+  const { render = true } = options;
+  workflowState.selectedNodeId = nodeId;
+  saveWorkflowState();
+  if (render) {
+    renderWorkflow();
+  } else {
+    applyWorkflowSelectionStyles(nodeId);
+  }
+  renderWorkflowInspectorPanel();
+}
+
+function clearWorkflowConnection() {
+  workflowState.connectingFrom = null;
+  workflowState.connectingPosition = null;
+  if (workflowConnectingHoverPort) {
+    workflowConnectingHoverPort.classList.remove("is-hover");
+    workflowConnectingHoverPort = null;
+  }
+  saveWorkflowState();
+  renderWorkflow();
+  setWorkflowStatus("");
+}
+
+function updateWorkflowConnectingPosition(clientX, clientY) {
+  if (!workflowState.connectingFrom || !workflowCanvas) return;
+  const rect = workflowCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const clampedX = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+  const clampedY = Math.min(Math.max(clientY - rect.top, 0), rect.height);
+  workflowState.connectingPosition = { x: clampedX, y: clampedY };
+  scheduleWorkflowEdgesRender();
+
+  const hovered = document.elementFromPoint(clientX, clientY);
+  const port = hovered?.closest?.(".node-port.in");
+  if (port && port.dataset.nodeId === workflowState.connectingFrom) {
+    if (workflowConnectingHoverPort) {
+      workflowConnectingHoverPort.classList.remove("is-hover");
+      workflowConnectingHoverPort = null;
+    }
+    return;
+  }
+  if (workflowConnectingHoverPort !== port) {
+    if (workflowConnectingHoverPort) {
+      workflowConnectingHoverPort.classList.remove("is-hover");
+    }
+    workflowConnectingHoverPort = port || null;
+    if (workflowConnectingHoverPort) {
+      workflowConnectingHoverPort.classList.add("is-hover");
+    }
+  }
+}
+
+function startWorkflowConnection(nodeId, event) {
+  if (!nodeId) return;
+  if (workflowState.connectingFrom === nodeId) {
+    clearWorkflowConnection();
+    return;
+  }
+  workflowState.connectingFrom = nodeId;
+  updateWorkflowConnectingPosition(event.clientX, event.clientY);
+  renderWorkflow();
+  setWorkflowStatus("Arraste ate a entrada do proximo bloco.", "success");
+}
+
+function finishWorkflowConnection(event) {
+  if (!workflowState.connectingFrom) return;
+  const hovered = document.elementFromPoint(event.clientX, event.clientY);
+  const port = hovered?.closest?.(".node-port.in");
+  if (port?.dataset?.nodeId) {
+    createWorkflowEdge(workflowState.connectingFrom, port.dataset.nodeId);
+    setWorkflowStatus("Conexao criada.", "success");
+  }
+  clearWorkflowConnection();
+}
+
+function ensureEdgeSvgSize() {
+  if (!workflowEdgesLayer || !workflowCanvas) return;
+  const rect = workflowCanvas.getBoundingClientRect();
+  workflowEdgesLayer.setAttribute("width", rect.width);
+  workflowEdgesLayer.setAttribute("height", rect.height);
+  workflowEdgesLayer.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+}
+
+function scheduleWorkflowEdgesRender() {
+  if (workflowEdgesRaf) return;
+  workflowEdgesRaf = window.requestAnimationFrame(() => {
+    workflowEdgesRaf = null;
+    renderWorkflowEdges();
+  });
+}
+
+function renderWorkflowEdges() {
+  if (!workflowEdgesLayer || !workflowCanvas) return;
+  workflowEdgesLayer.innerHTML = "";
+  ensureEdgeSvgSize();
+  const rect = workflowCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  workflowState.edges.forEach((edge) => {
+    const fromPort = workflowNodesLayer?.querySelector(
+      `[data-node-id="${edge.from}"] .node-port.out`
+    );
+    const toPort = workflowNodesLayer?.querySelector(
+      `[data-node-id="${edge.to}"] .node-port.in`
+    );
+    if (!fromPort || !toPort) return;
+
+    const fromRect = fromPort.getBoundingClientRect();
+    const toRect = toPort.getBoundingClientRect();
+
+    const x1 = fromRect.left - rect.left + fromRect.width / 2;
+    const y1 = fromRect.top - rect.top + fromRect.height / 2;
+    const x2 = toRect.left - rect.left + toRect.width / 2;
+    const y2 = toRect.top - rect.top + toRect.height / 2;
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const tension = Math.max(60, Math.abs(x2 - x1) * 0.5);
+    path.setAttribute(
+      "d",
+      `M ${x1} ${y1} C ${x1 + tension} ${y1}, ${x2 - tension} ${y2}, ${x2} ${y2}`
+    );
+    path.setAttribute("class", "workflow-edge");
+    path.dataset.edgeId = edge.id;
+    path.dataset.from = edge.from;
+    path.dataset.to = edge.to;
+    workflowEdgesLayer.append(path);
+  });
+
+  if (workflowState.connectingFrom) {
+    const activePath = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "path"
+    );
+    const fromPort = workflowNodesLayer?.querySelector(
+      `[data-node-id="${workflowState.connectingFrom}"] .node-port.out`
+    );
+    if (fromPort) {
+      const fromRect = fromPort.getBoundingClientRect();
+      const x1 = fromRect.left - rect.left + fromRect.width / 2;
+      const y1 = fromRect.top - rect.top + fromRect.height / 2;
+      const fallback = { x: x1 + 80, y: y1 };
+      const target = workflowState.connectingPosition || fallback;
+      const x2 = target.x;
+      const y2 = target.y;
+      activePath.setAttribute(
+        "d",
+        `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2} ${y2}, ${x2} ${y2}`
+      );
+      activePath.setAttribute("class", "workflow-edge is-active");
+      workflowEdgesLayer.append(activePath);
+    }
+  }
+}
+
+function createWorkflowEdge(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return;
+  const exists = workflowState.edges.some(
+    (edge) => edge.from === fromId && edge.to === toId
+  );
+  if (exists) return;
+  workflowState.edges.push({
+    id: `edge-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    from: fromId,
+    to: toId,
+  });
+  const fromNode = workflowState.nodes.find((node) => node.id === fromId);
+  if (fromNode?.output?.data) {
+    propagateNodeOutput(fromNode);
+  }
+  saveWorkflowState();
+  scheduleWorkflowEdgesRender();
+}
+
+function deleteWorkflowEdge(edgeId) {
+  if (!edgeId) return;
+  workflowState.edges = workflowState.edges.filter((edge) => edge.id !== edgeId);
+  saveWorkflowState();
+  scheduleWorkflowEdgesRender();
+}
+
+function deleteWorkflowNode(nodeId) {
+  if (!nodeId) return;
+  workflowState.nodes = workflowState.nodes.filter((item) => item.id !== nodeId);
+  workflowState.edges = workflowState.edges.filter(
+    (edge) => edge.from !== nodeId && edge.to !== nodeId
+  );
+  if (workflowState.selectedNodeId === nodeId) {
+    workflowState.selectedNodeId = null;
+  }
+  if (workflowState.connectingFrom === nodeId) {
+    workflowState.connectingFrom = null;
+    workflowState.connectingPosition = null;
+  }
+  if (workflowModalNodeId === nodeId) {
+    closeWorkflowModal();
+  }
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  setWorkflowStatus("Bloco removido.", "success");
+}
+
+function openWorkflowMenu(x, y, nodeId) {
+  if (!workflowMenu) return;
+  workflowMenuNodeId = nodeId;
+  const node = workflowState.nodes.find((item) => item.id === nodeId);
+  const responseItem = workflowMenu.querySelector(
+    '.context-item[data-action="view-response"]'
+  );
+  const runItem = workflowMenu.querySelector(
+    '.context-item[data-action="run"]'
+  );
+  const refreshItem = workflowMenu.querySelector(
+    '.context-item[data-action="refresh-table"]'
+  );
+  const viewTableItem = workflowMenu.querySelector(
+    '.context-item[data-action="view-table"]'
+  );
+  const isStart = node?.type === "start";
+  const isWebhook = node?.type === "webhook";
+  const isBlock = node?.type === "block";
+  const isTable = node?.type === "table";
+  const canViewResponse = isWebhook || isBlock;
+  if (runItem) {
+    runItem.style.display = isStart ? "" : "none";
+    runItem.textContent = "Executar fluxo";
+  }
+  if (responseItem) {
+    responseItem.style.display = canViewResponse ? "" : "none";
+    const hasResult = Boolean(node?.lastResult) && canViewResponse;
+    responseItem.classList.toggle("is-disabled", !hasResult);
+  }
+  if (refreshItem) {
+    refreshItem.style.display = isTable ? "" : "none";
+  }
+  if (viewTableItem) {
+    viewTableItem.style.display = isTable ? "" : "none";
+    const hasData = node?.tableData?.rows?.length;
+    viewTableItem.classList.toggle("is-disabled", !hasData);
+  }
+  workflowMenu.classList.add("is-open");
+  workflowMenu.style.left = `${x}px`;
+  workflowMenu.style.top = `${y}px`;
+
+  const padding = 8;
+  const rect = workflowMenu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+
+  if (rect.right > window.innerWidth - padding) {
+    left = window.innerWidth - rect.width - padding;
+  }
+  if (rect.bottom > window.innerHeight - padding) {
+    top = window.innerHeight - rect.height - padding;
+  }
+
+  workflowMenu.style.left = `${Math.max(padding, left)}px`;
+  workflowMenu.style.top = `${Math.max(padding, top)}px`;
+}
+
+function closeWorkflowMenu() {
+  if (!workflowMenu) return;
+  workflowMenu.classList.remove("is-open");
+  workflowMenuNodeId = null;
+}
+
+function openWorkflowEdgeMenu(x, y, edge) {
+  if (!workflowEdgeMenu || !edge) return;
+  workflowMenuEdge = edge;
+  workflowEdgeMenu.classList.add("is-open");
+  workflowEdgeMenu.style.left = `${x}px`;
+  workflowEdgeMenu.style.top = `${y}px`;
+
+  const padding = 8;
+  const rect = workflowEdgeMenu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+
+  if (rect.right > window.innerWidth - padding) {
+    left = window.innerWidth - rect.width - padding;
+  }
+  if (rect.bottom > window.innerHeight - padding) {
+    top = window.innerHeight - rect.height - padding;
+  }
+
+  workflowEdgeMenu.style.left = `${Math.max(padding, left)}px`;
+  workflowEdgeMenu.style.top = `${Math.max(padding, top)}px`;
+}
+
+function closeWorkflowEdgeMenu() {
+  if (!workflowEdgeMenu) return;
+  workflowEdgeMenu.classList.remove("is-open");
+  workflowMenuEdge = null;
+}
+
+function openWorkflowModal(nodeId) {
+  if (!workflowModal) return;
+  const node = workflowState.nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  workflowModalNodeId = nodeId;
+  if (workflowModalTitle) {
+    const def = getWorkflowBrick(node.type);
+    workflowModalTitle.textContent = getNodeDisplayName(node, def) || "Propriedades";
+  }
+  workflowModal.classList.add("is-open");
+  renderWorkflowModal();
+}
+
+function closeWorkflowModal() {
+  if (!workflowModal) return;
+  workflowModal.classList.remove("is-open");
+  workflowModalNodeId = null;
+  if (workflowModalBody) workflowModalBody.innerHTML = "";
+}
+
+function openWorkflowResponseModal(nodeId) {
+  if (!workflowResponseModal || !workflowResponseBody) return;
+  const node = workflowState.nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  workflowResponseNodeId = nodeId;
+  if (workflowResponseTitle) {
+    const displayName = getNodeDisplayName(node);
+    workflowResponseTitle.textContent = displayName
+      ? `Retorno: ${displayName}`
+      : "Retorno do Webhook";
+  }
+  workflowResponseModal.classList.add("is-open");
+  renderWorkflowResponseModal();
+}
+
+function closeWorkflowResponseModal() {
+  if (!workflowResponseModal) return;
+  workflowResponseModal.classList.remove("is-open");
+  workflowResponseNodeId = null;
+  if (workflowResponseBody) workflowResponseBody.innerHTML = "";
+}
+
+function openWorkflowTableModal(nodeId) {
+  if (!workflowTableModal || !workflowTableBody) return;
+  const node = workflowState.nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  workflowTableNodeId = nodeId;
+  if (workflowTableTitle) {
+    const displayName = getNodeDisplayName(node);
+    workflowTableTitle.textContent = displayName
+      ? `Tabela: ${displayName}`
+      : "Tabela";
+  }
+  workflowTableModal.classList.add("is-open");
+  renderWorkflowTableModal();
+}
+
+function closeWorkflowTableModal() {
+  if (!workflowTableModal) return;
+  workflowTableModal.classList.remove("is-open");
+  workflowTableNodeId = null;
+  if (workflowTableBody) workflowTableBody.innerHTML = "";
+}
+
+function openWorkflowLoadModal() {
+  if (!workflowLoadModal) return;
+  if (workflowLoadFeedback) workflowLoadFeedback.textContent = "";
+  workflowLoadModal.classList.add("is-open");
+  fetchWorkflowList();
+}
+
+function closeWorkflowLoadModal() {
+  if (!workflowLoadModal) return;
+  workflowLoadModal.classList.remove("is-open");
+  if (workflowLoadFeedback) workflowLoadFeedback.textContent = "";
+}
+
+function openWorkflowSaveModal() {
+  if (!workflowSaveModal || !workflowSaveName) return;
+  const lastName = window.localStorage.getItem(WORKFLOW_NAME_KEY) || "";
+  workflowSaveName.value = lastName;
+  if (workflowSaveFeedback) workflowSaveFeedback.textContent = "";
+  workflowSaveModal.classList.add("is-open");
+  setTimeout(() => {
+    workflowSaveName.focus();
+    workflowSaveName.select();
+  }, 0);
+}
+
+function closeWorkflowSaveModal() {
+  if (!workflowSaveModal) return;
+  workflowSaveModal.classList.remove("is-open");
+  if (workflowSaveFeedback) workflowSaveFeedback.textContent = "";
+}
+
+function renderWorkflowResponseModal() {
+  if (!workflowResponseModal || !workflowResponseBody) return;
+  if (!workflowResponseModal.classList.contains("is-open")) return;
+  const node = workflowState.nodes.find(
+    (item) => item.id === workflowResponseNodeId
+  );
+  if (!node) {
+    closeWorkflowResponseModal();
+    return;
+  }
+  const result = node.lastResult;
+  if (!result) {
+    workflowResponseBody.textContent = "Nenhum retorno registrado.";
+    return;
+  }
+  if (node.type === "block" || result.kind === "block") {
+    workflowResponseBody.textContent = JSON.stringify(result, null, 2);
+    return;
+  }
+  const lines = [
+    `Status: ${result.status ?? "-"} ${result.statusText || ""}`.trim(),
+    `OK: ${result.ok ? "Sim" : "Nao"}`,
+    result.elapsedMs !== undefined ? `Tempo: ${result.elapsedMs} ms` : null,
+    result.url ? `URL: ${result.url}` : null,
+    result.warning ? `Aviso: ${result.warning}` : null,
+    result.error ? `Erro: ${result.error}` : null,
+  ].filter(Boolean);
+
+  let body = result.bodyText || "";
+  if (result.bodyJson && typeof result.bodyJson === "object") {
+    try {
+      body = JSON.stringify(result.bodyJson, null, 2);
+    } catch {
+      body = result.bodyText || "";
+    }
+  }
+
+  const content = `${lines.join("\n")}\n\n${body}`;
+  workflowResponseBody.textContent = content;
+}
+
+function renderWorkflowTableModal() {
+  if (!workflowTableModal || !workflowTableBody) return;
+  if (!workflowTableModal.classList.contains("is-open")) return;
+  const node = workflowState.nodes.find(
+    (item) => item.id === workflowTableNodeId
+  );
+  if (!node) {
+    closeWorkflowTableModal();
+    return;
+  }
+  const data = node.tableData;
+  workflowTableBody.innerHTML = "";
+  if (!data || !data.columns || data.columns.length === 0) {
+    workflowTableBody.textContent = "Sem dados para exibir.";
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "modal-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  data.columns.forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    headRow.append(th);
+  });
+  thead.append(headRow);
+  table.append(thead);
+
+  const tbody = document.createElement("tbody");
+  data.rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    data.columns.forEach((col) => {
+      const td = document.createElement("td");
+      const value = row?.[col];
+      if (value === null || value === undefined) {
+        td.textContent = "-";
+      } else if (typeof value === "object") {
+        td.textContent = JSON.stringify(value);
+      } else {
+        td.textContent = String(value);
+      }
+      tr.append(td);
+    });
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  workflowTableBody.append(table);
+}
+
+function parseKeyValueLines(input) {
+  const result = {};
+  if (!input) return result;
+  input
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const match = line.match(/^([^:=]+)\s*[:=]\s*(.*)$/);
+      if (!match) return;
+      const key = match[1].trim();
+      const value = match[2].trim();
+      if (!key) return;
+      result[key] = value;
+    });
+  return result;
+}
+
+function getValueByPath(value, path) {
+  if (!path) return value;
+  const segments = String(path)
+    .split(".")
+    .map((seg) => seg.trim())
+    .filter(Boolean);
+  let current = value;
+  for (const segment of segments) {
+    if (current === undefined || current === null) return null;
+    const parts = segment.split(/[\[\]]/).filter(Boolean);
+    for (const part of parts) {
+      if (current === undefined || current === null) return null;
+      if (/^\d+$/.test(part)) {
+        current = current[Number(part)];
+      } else {
+        current = current[part];
+      }
+    }
+  }
+  return current;
+}
+
+function isPrimitive(value) {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function flattenObject(value, options = {}, prefix = "", depth = 0) {
+  const {
+    maxDepth = 2,
+    keepNull = true,
+    allowPrimitiveArrays = true,
+  } = options;
+
+  if (isPrimitive(value)) {
+    if (value === null && !keepNull) return {};
+    return { [prefix]: value };
+  }
+
+  if (Array.isArray(value)) {
+    if (!allowPrimitiveArrays) return {};
+    const primitivesOnly = value.every((item) => isPrimitive(item));
+    if (!primitivesOnly) return {};
+    return { [prefix]: value.filter((item) => item !== null).join(", ") };
+  }
+
+  if (typeof value !== "object") return {};
+  if (depth >= maxDepth) return {};
+
+  return Object.entries(value).reduce((acc, [key, val]) => {
+    const nextKey = prefix ? `${prefix}.${key}` : key;
+    const flattened = flattenObject(val, options, nextKey, depth + 1);
+    Object.assign(acc, flattened);
+    return acc;
+  }, {});
+}
+
+function normalizeTableData(payload) {
+  if (payload === undefined || payload === null) return { columns: [], rows: [] };
+
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return { columns: [], rows: [] };
+    const rows = [];
+    const columns = [];
+    payload.forEach((item, index) => {
+      if (isPrimitive(item)) {
+        const row = { value: item };
+        rows.push(row);
+        if (!columns.includes("value")) columns.push("value");
+        return;
+      }
+      if (Array.isArray(item)) {
+        const row = { value: item.join(", ") };
+        rows.push(row);
+        if (!columns.includes("value")) columns.push("value");
+        return;
+      }
+      if (item && typeof item === "object") {
+        const flat = flattenObject(item, { maxDepth: 3 });
+        rows.push(flat);
+        Object.keys(flat).forEach((key) => {
+          if (!columns.includes(key)) columns.push(key);
+        });
+        return;
+      }
+      const row = { value: String(item) };
+      rows.push(row);
+      if (!columns.includes("value")) columns.push("value");
+    });
+    return { columns, rows };
+  }
+
+  if (typeof payload === "object") {
+    const flat = flattenObject(payload, { maxDepth: 3 });
+    const columns = Object.keys(flat);
+    return { columns, rows: columns.length ? [flat] : [] };
+  }
+
+  return { columns: ["value"], rows: [{ value: payload }] };
+}
+
+function isEmptyDataItem(item) {
+  if (item === null) return true;
+  if (typeof item === "string") return item.trim().length === 0;
+  if (Array.isArray(item)) return item.length === 0;
+  if (item && typeof item === "object") return Object.keys(item).length === 0;
+  return false;
+}
+
+function getDefaultDataItem(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  if (payload.payload !== undefined) return payload.payload;
+  if (payload.data?.items !== undefined) return payload.data.items;
+  if (payload.data?.item !== undefined) return payload.data.item;
+  return payload;
+}
+
+function extractTableSource(payload) {
+  return getDefaultDataItem(payload);
+}
+
+function applyTableDataToNode(tableNode, payload, sourceNodeId) {
+  const limit = Number(tableNode.config?.maxRows) || 25;
+  const updatedAt = new Date().toISOString();
+  if (payload === undefined) {
+    tableNode.tableData = {
+      columns: [],
+      rows: [],
+      sourceNodeId,
+      updatedAt,
+    };
+    setNodeExecutionStatus(tableNode, "error");
+    renderWorkflowTableModal();
+    return;
+  }
+  const source = extractTableSource(payload);
+  const normalized = normalizeTableData(source);
+  const rows =
+    normalized.rows.length > limit
+      ? normalized.rows.slice(0, limit)
+      : normalized.rows;
+  tableNode.tableData = {
+    columns: normalized.columns,
+    rows,
+    sourceNodeId,
+    updatedAt,
+  };
+  setNodeOutputItem(tableNode, payload);
+  const isEmpty = isEmptyDataItem(source) || normalized.rows.length === 0;
+  setNodeExecutionStatus(tableNode, isEmpty ? "warning" : "success");
+  renderWorkflowTableModal();
+}
+
+function setNodeOutputItem(node, item) {
+  node.output = {
+    data: {
+      item,
+    },
+  };
+  node.outputUpdatedAt = new Date().toISOString();
+}
+
+function getNodeOutputItem(node) {
+  return node?.output?.data?.item;
+}
+
+function setNodeExecutionStatus(node, status) {
+  node.execStatus = status || null;
+  node.execStatusAt = new Date().toISOString();
+}
+
+function setWorkflowRunning(isRunning) {
+  if (!workflowCanvas) return;
+  workflowCanvas.classList.toggle("is-running", Boolean(isRunning));
+}
+
+function getExecutionOrder(startNodeId) {
+  const adjacency = workflowState.edges.reduce((acc, edge) => {
+    if (!acc[edge.from]) acc[edge.from] = [];
+    acc[edge.from].push(edge.to);
+    return acc;
+  }, {});
+  const order = [];
+  const queue = [startNodeId];
+  const visited = new Set([startNodeId]);
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (current !== startNodeId) {
+      const node = workflowState.nodes.find((item) => item.id === current);
+      if (node) order.push(node);
+    }
+    const nexts = adjacency[current] || [];
+    nexts.forEach((nextId) => {
+      if (!visited.has(nextId)) {
+        visited.add(nextId);
+        queue.push(nextId);
+      }
+    });
+  }
+
+  return order;
+}
+
+async function executeWorkflowFromStart(startNode) {
+  if (!startNode) return;
+  setWorkflowRunning(true);
+  const order = getExecutionOrder(startNode.id);
+  setNodeExecutionStatus(startNode, null);
+  order.forEach((node) => {
+    node.execStatus = null;
+  });
+  saveWorkflowState();
+  renderWorkflow();
+
+  if (!order.length) {
+    setWorkflowStatus("Nenhum bloco conectado ao inicio.", "warning");
+    setNodeExecutionStatus(startNode, "warning");
+    renderWorkflow();
+    setWorkflowRunning(false);
+    return;
+  }
+
+  setWorkflowStatus("Executando fluxo...", "success");
+  let hasWarning = false;
+
+  for (const node of order) {
+    if (node.type === "webhook") {
+      const result = await executeWebhookNode(node);
+      if (node.execStatus === "warning") {
+        hasWarning = true;
+        setWorkflowStatus("Parametros faltando no webhook.", "warning");
+        break;
+      }
+      if (!result.ok) {
+        setWorkflowStatus("Falha ao executar webhook.", "error");
+        setNodeExecutionStatus(startNode, "error");
+        renderWorkflow();
+        setWorkflowRunning(false);
+        return;
+      }
+    } else if (node.type === "filter") {
+      const result = executeFilterNode(node);
+      if (!result.ok) {
+        hasWarning = true;
+        setWorkflowStatus("Filtro nao executado.", "warning");
+        break;
+      }
+    } else if (node.type === "block") {
+      const result = await executeBlockNode(node);
+      if (!result.ok) {
+        if (result.level === "warning") {
+          hasWarning = true;
+          setWorkflowStatus("Bloqueio nao executado.", "warning");
+          break;
+        }
+        setWorkflowStatus("Falha ao processar bloqueio.", "error");
+        setNodeExecutionStatus(startNode, "error");
+        renderWorkflow();
+        setWorkflowRunning(false);
+        return;
+      }
+      if (result.level === "warning") {
+        hasWarning = true;
+      }
+    } else if (node.type === "table") {
+      refreshTableFromUpstream(node);
+      if (node.execStatus === "warning") {
+        hasWarning = true;
+      }
+    }
+  }
+
+  setNodeExecutionStatus(startNode, hasWarning ? "warning" : "success");
+  setWorkflowStatus(
+    hasWarning ? "Fluxo concluido com alertas." : "Fluxo executado.",
+    hasWarning ? "warning" : "success"
+  );
+  saveWorkflowState();
+  renderWorkflow();
+  setWorkflowRunning(false);
+}
+
+function buildWebhookRequest(node) {
+  const config = node.config || {};
+  const method = (config.method || "GET").toUpperCase();
+  const url = config.url ? String(config.url).trim() : "";
+  if (!url) {
+    throw new Error("URL obrigatoria.");
+  }
+  const headers = new Headers();
+  const authType = config.authType || "none";
+  if (authType === "bearer") {
+    if (!config.authToken) {
+      throw new Error("Bearer token obrigatorio.");
+    }
+    headers.set("Authorization", `Bearer ${config.authToken}`);
+  } else if (authType === "apiKey") {
+    const headerName = config.apiKeyHeader || "x-api-key";
+    if (!config.apiKeyValue) {
+      throw new Error("API Key obrigatoria.");
+    }
+    headers.set(headerName, config.apiKeyValue);
+  }
+
+  const extraHeaders = parseKeyValueLines(config.headers);
+  Object.entries(extraHeaders).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
+
+  const queryParams = parseKeyValueLines(config.queryParams);
+  const requestUrl = new URL(url);
+  Object.entries(queryParams).forEach(([key, value]) => {
+    requestUrl.searchParams.set(key, value);
+  });
+
+  let body = null;
+  let warning = null;
+  const bodyType = config.bodyType || "none";
+  if (bodyType !== "none" && method === "GET") {
+    warning = "Body ignorado para metodo GET.";
+  } else if (bodyType === "json") {
+    if (!config.body) {
+      body = null;
+    } else {
+      let parsed;
+      try {
+        parsed = JSON.parse(config.body);
+      } catch {
+        throw new Error("JSON invalido no payload.");
+      }
+      body = JSON.stringify(parsed);
+      if (!headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+    }
+  } else if (bodyType === "form") {
+    const params = parseKeyValueLines(config.body);
+    const formBody = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      formBody.append(key, value);
+    });
+    body = formBody.toString();
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/x-www-form-urlencoded");
+    }
+  } else if (bodyType === "text") {
+    body = config.body || "";
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "text/plain");
+    }
+  }
+
+  const options = {
+    method,
+    headers,
+  };
+  if (body && method !== "GET") {
+    options.body = body;
+  }
+
+  return { url: requestUrl.toString(), options, warning };
+}
+
+function getWebhookPayload(node, result) {
+  if (!result) return null;
+  let payload = result.bodyJson;
+  if (!payload && result.bodyText) {
+    try {
+      payload = JSON.parse(result.bodyText);
+    } catch {
+      payload = result.bodyText;
+    }
+  }
+  return payload;
+}
+
+function getNodeDefaultItem(node, result) {
+  const payload = getWebhookPayload(node, result);
+  const responsePath = node.config?.responsePath;
+  if (!responsePath || responsePath === WORKFLOW_DEFAULT_OUTPUT_PATH) {
+    return getDefaultDataItem(payload);
+  }
+  return getValueByPath(payload, responsePath);
+}
+
+function propagateNodeOutput(sourceNode) {
+  const payload = getNodeOutputItem(sourceNode);
+  const targets = workflowState.edges
+    .filter((edge) => edge.from === sourceNode.id)
+    .map((edge) => workflowState.nodes.find((node) => node.id === edge.to))
+    .filter((node) => node && node.type === "table");
+
+  targets.forEach((tableNode) => {
+    applyTableDataToNode(tableNode, payload, sourceNode.id);
+  });
+}
+
+function getUpstreamNode(tableNode) {
+  if (!tableNode) return null;
+  const incoming = workflowState.edges.find((edge) => edge.to === tableNode.id);
+  if (!incoming) return null;
+  const fromNode = workflowState.nodes.find((node) => node.id === incoming.from);
+  return fromNode || null;
+}
+
+function refreshTableFromUpstream(tableNode) {
+  const source = getUpstreamNode(tableNode);
+  if (!source) {
+    setWorkflowStatus("Tabela sem bloco anterior conectado.", "warning");
+    setNodeExecutionStatus(tableNode, "warning");
+    return;
+  }
+  const item = getNodeOutputItem(source);
+  if (item === undefined) {
+    setWorkflowStatus("Erro ao ler data.item do bloco anterior.", "error");
+    setNodeExecutionStatus(tableNode, "error");
+    return;
+  }
+  applyTableDataToNode(tableNode, item, source.id);
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  setWorkflowStatus("Tabela atualizada.", "success");
+}
+
+function executeFilterNode(node) {
+  ensureFilterConditions(node);
+  const source = getUpstreamNode(node);
+  if (!source) {
+    setWorkflowStatus("Filtro sem bloco anterior conectado.", "warning");
+    setNodeExecutionStatus(node, "warning");
+    return { ok: false, reason: "missing-upstream" };
+  }
+  const item = getNodeOutputItem(source);
+  if (item === undefined) {
+    setWorkflowStatus("Bloco anterior ainda nao possui data.item.", "warning");
+    setNodeExecutionStatus(node, "warning");
+    return { ok: false, reason: "missing-item" };
+  }
+  if (!isFilterableItem(item)) {
+    setWorkflowStatus("Nao foi possivel interpretar o data.item anterior.", "error");
+    setNodeExecutionStatus(node, "error");
+    return { ok: false, reason: "invalid-item" };
+  }
+
+  const conditions = (node.config?.conditions || []).map(normalizeConditionRow);
+  const hasValid = conditions.some((cond) => cond.field && cond.operator);
+  if (!hasValid) {
+    setWorkflowStatus("Defina ao menos uma condicao no filtro.", "warning");
+    setNodeExecutionStatus(node, "warning");
+    return { ok: false, reason: "missing-conditions" };
+  }
+
+  const logic = node.config?.logic || "AND";
+  let filtered = null;
+  try {
+    filtered = applyFilterToItem(item, conditions, logic);
+  } catch (err) {
+    setWorkflowStatus("Erro ao processar o filtro.", "error");
+    setNodeExecutionStatus(node, "error");
+    return { ok: false, reason: "filter-error", error: err };
+  }
+  setNodeOutputItem(node, filtered);
+  setNodeExecutionStatus(node, "success");
+  propagateNodeOutput(node);
+  return { ok: true, value: filtered };
+}
+
+async function executeBlockNode(node) {
+  const source = getUpstreamNode(node);
+  const sourceMode = node.config?.sourceMode || "data";
+  let targets = [];
+
+  if (sourceMode === "manual") {
+    targets = parseManualTargets(node.config?.manualTargets);
+    if (!targets.length) {
+      setWorkflowStatus("Informe pelo menos um alvo manual.", "warning");
+      setNodeExecutionStatus(node, "warning");
+      return { ok: false, level: "warning", reason: "empty-manual" };
+    }
+  } else {
+    if (!source) {
+      setWorkflowStatus("Bloqueio sem bloco anterior conectado.", "warning");
+      setNodeExecutionStatus(node, "warning");
+      return { ok: false, level: "warning", reason: "missing-upstream" };
+    }
+
+    const item = getNodeOutputItem(source);
+    if (item === undefined) {
+      setWorkflowStatus(
+        "Nao foi possivel recuperar data.item do bloco anterior.",
+        "warning"
+      );
+      setNodeExecutionStatus(node, "warning");
+      return { ok: false, level: "warning", reason: "missing-item" };
+    }
+
+    const sourceItem = getBlockSourceItem(item, node.config || {});
+    if (sourceItem === undefined || sourceItem === null) {
+      setWorkflowStatus(
+        "Nao foi possivel recuperar data.items do bloco anterior.",
+        "warning"
+      );
+      setNodeExecutionStatus(node, "warning");
+      return { ok: false, level: "warning", reason: "missing-source" };
+    }
+    if (Array.isArray(sourceItem) && sourceItem.length === 0) {
+      setWorkflowStatus("Nenhum item para bloqueio.", "warning");
+      setNodeExecutionStatus(node, "warning");
+      return { ok: false, level: "warning", reason: "empty-items" };
+    }
+
+    try {
+      targets = buildBlockTargets(sourceItem, node.config || {});
+    } catch (err) {
+      setWorkflowStatus("Erro ao processar o bloco de bloqueio.", "error");
+      setNodeExecutionStatus(node, "error");
+      return { ok: false, level: "error", reason: "process-error", error: err };
+    }
+
+    if (!targets.length) {
+      setWorkflowStatus(
+        "Nao foi possivel interpretar o data.items anterior.",
+        "error"
+      );
+      setNodeExecutionStatus(node, "error");
+      return { ok: false, level: "error", reason: "no-targets" };
+    }
+  }
+
+  const validation = buildBlockSchedulePayload(node.config || {}, targets[0]);
+  if (validation.error) {
+    setWorkflowStatus(validation.error, "warning");
+    setNodeExecutionStatus(node, "warning");
+    return { ok: false, level: "warning", reason: "invalid-config" };
+  }
+
+  const responses = [];
+  let successCount = 0;
+  let failedCount = 0;
+  let lastStatus = null;
+  for (const target of targets) {
+    const { payload, error } = buildBlockSchedulePayload(node.config || {}, target);
+    if (error || !payload) {
+      failedCount += 1;
+      responses.push({ target, ok: false, error: error || "Payload invalido." });
+      continue;
+    }
+    try {
+      const response = await apiFetch("/api/schedules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      lastStatus = response.status;
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      if (!response.ok) {
+        failedCount += 1;
+        responses.push({
+          target,
+          ok: false,
+          status: response.status,
+          error: data?.error || "Falha ao criar agendamento.",
+        });
+        continue;
+      }
+      const apiFailure = getApiFailureDetails(data?.api);
+      if (apiFailure) {
+        failedCount += 1;
+        responses.push({
+          target,
+          ok: false,
+          status: response.status,
+          error: apiFailure.message,
+          detail: apiFailure.detail,
+        });
+        continue;
+      }
+      successCount += 1;
+      responses.push({
+        target,
+        ok: true,
+        status: response.status,
+        scheduleId: data?.schedule?.id || null,
+      });
+    } catch (err) {
+      failedCount += 1;
+      responses.push({
+        target,
+        ok: false,
+        error: err?.message || "Falha ao chamar API.",
+      });
+    }
+  }
+
+  const output = {
+    actionType: Number(node.config?.actionType ?? 0),
+    targetType: Number(node.config?.targetType ?? 0),
+    targets: responses.filter((item) => item.ok).map((item) => item.target),
+    failedTargets: responses.filter((item) => !item.ok).map((item) => item.target),
+    total: targets.length,
+    successCount,
+    failedCount,
+  };
+
+  node.lastResult = {
+    kind: "block",
+    ok: failedCount === 0 && successCount > 0,
+    status: lastStatus,
+    total: targets.length,
+    successCount,
+    failedCount,
+    targets,
+    responses,
+  };
+  node.lastRunAt = new Date().toISOString();
+
+  setNodeOutputItem(node, output);
+
+  if (successCount === 0) {
+    setNodeExecutionStatus(node, "error");
+    return { ok: false, level: "error", reason: "all-failed" };
+  }
+  if (failedCount > 0) {
+    setNodeExecutionStatus(node, "warning");
+    propagateNodeOutput(node);
+    return { ok: true, level: "warning", value: output };
+  }
+
+  setNodeExecutionStatus(node, "success");
+  propagateNodeOutput(node);
+  return { ok: true, level: "success", value: output };
+}
+
+async function executeWebhookNode(node) {
+  const start = performance.now();
+  const result = {
+    ok: false,
+    status: null,
+    statusText: "",
+    url: "",
+    elapsedMs: null,
+    headers: null,
+    bodyText: "",
+    bodyJson: null,
+    warning: null,
+    error: null,
+  };
+
+  try {
+    const { url, options, warning } = buildWebhookRequest(node);
+    result.warning = warning;
+    const response = await fetch(url, options);
+    const elapsed = Math.round(performance.now() - start);
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    result.ok = response.ok;
+    result.status = response.status;
+    result.statusText = response.statusText;
+    result.url = response.url;
+    result.elapsedMs = elapsed;
+    result.headers = Object.fromEntries(response.headers.entries());
+    result.bodyText =
+      text.length > WORKFLOW_RESULT_LIMIT
+        ? `${text.slice(0, WORKFLOW_RESULT_LIMIT)}\n...`
+        : text;
+    result.bodyJson = json;
+    setNodeExecutionStatus(node, response.ok ? "success" : "error");
+  } catch (err) {
+    result.error = err?.message || "Falha ao executar webhook.";
+    const message = String(result.error).toLowerCase();
+    if (message.includes("obrigator")) {
+      setNodeExecutionStatus(node, "warning");
+    } else {
+      setNodeExecutionStatus(node, "error");
+    }
+  }
+
+  node.lastResult = result;
+  node.lastRunAt = new Date().toISOString();
+  const item = getNodeDefaultItem(node, result);
+  setNodeOutputItem(node, item);
+  propagateNodeOutput(node);
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  renderWorkflowResponseModal();
+
+  return result;
+}
+
+function bindWorkflowNodeDrag(nodeEl, node) {
+  nodeEl.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".node-delete")) {
+      return;
+    }
+    if (event.target.closest(".node-port")) {
+      return;
+    }
+    if (workflowState.connectingFrom) {
+      clearWorkflowConnection();
+    }
+    if (event.button !== 0) return;
+    event.preventDefault();
+    selectWorkflowNode(node.id, { render: false });
+    const canvasRect = workflowCanvas?.getBoundingClientRect();
+    if (!canvasRect) return;
+    const offsetX = event.clientX - canvasRect.left - node.position.x;
+    const offsetY = event.clientY - canvasRect.top - node.position.y;
+    const pointerId = event.pointerId;
+    if (nodeEl.setPointerCapture) {
+      nodeEl.setPointerCapture(pointerId);
+    }
+
+    const handleMove = (moveEvent) => {
+      const rect = workflowCanvas?.getBoundingClientRect();
+      if (!rect) return;
+      const nextX = moveEvent.clientX - rect.left - offsetX;
+      const nextY = moveEvent.clientY - rect.top - offsetY;
+      node.position.x = Math.max(8, nextX);
+      node.position.y = Math.max(8, nextY);
+      nodeEl.style.left = `${node.position.x}px`;
+      nodeEl.style.top = `${node.position.y}px`;
+      scheduleWorkflowEdgesRender();
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      if (nodeEl.releasePointerCapture) {
+        nodeEl.releasePointerCapture(pointerId);
+      }
+      saveWorkflowState();
+      scheduleWorkflowEdgesRender();
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  });
+}
+
+function renderWorkflowPalette() {
+  if (!workflowPalette) return;
+  workflowPalette.innerHTML = "";
+  WORKFLOW_BRICKS.forEach((brick) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "brick-tile";
+    button.setAttribute("draggable", "true");
+    button.dataset.brick = brick.type;
+
+    const meta = document.createElement("div");
+    meta.className = "brick-meta";
+    meta.textContent = brick.group || "Bloco";
+
+    const title = document.createElement("div");
+    title.className = "brick-title";
+    title.textContent = brick.title;
+
+    const subtitle = document.createElement("div");
+    subtitle.className = "brick-subtitle";
+    subtitle.textContent = brick.subtitle;
+
+    button.append(meta, title, subtitle);
+    workflowPalette.append(button);
+  });
+}
+
+function renderWorkflow() {
+  if (!workflowNodesLayer) return;
+  workflowNodesLayer.innerHTML = "";
+  const hasNodes = workflowState.nodes.length > 0;
+  if (workflowEmpty) {
+    workflowEmpty.style.display = hasNodes ? "none" : "grid";
+  }
+  workflowState.nodes.forEach((node) => {
+    const def = getWorkflowBrick(node.type);
+    const nodeEl = document.createElement("div");
+    nodeEl.className = "workflow-node";
+    if (node.id === workflowState.selectedNodeId) {
+      nodeEl.classList.add("is-selected");
+    }
+    if (node.type === "filter") {
+      nodeEl.classList.add("is-filter");
+    }
+  if (node.execStatus === "success") {
+    nodeEl.classList.add("is-success");
+  } else if (node.execStatus === "error") {
+    nodeEl.classList.add("is-error");
+  } else if (node.execStatus === "warning") {
+    nodeEl.classList.add("is-warning");
+  }
+    nodeEl.style.left = `${node.position.x}px`;
+    nodeEl.style.top = `${node.position.y}px`;
+    nodeEl.dataset.nodeId = node.id;
+    if (node.type === "start") {
+      nodeEl.classList.add("is-start");
+    }
+
+    const displayTitle = getNodeDisplayName(node, def);
+
+    if (node.type === "start") {
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "node-delete start-delete";
+      removeButton.setAttribute("aria-label", "Excluir bloco");
+      removeButton.textContent = "x";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteWorkflowNode(node.id);
+      });
+
+      const shape = document.createElement("div");
+      shape.className = "start-shape";
+      const ring = document.createElement("div");
+      ring.className = "start-ring";
+      const core = document.createElement("div");
+      core.className = "start-core";
+      ring.append(core);
+      shape.append(ring);
+
+      const label = document.createElement("div");
+      label.className = "start-label";
+      label.textContent = displayTitle || "Inicio";
+
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      const portOut = document.createElement("span");
+      portOut.className = "node-port out";
+      portOut.dataset.nodeId = node.id;
+      portOut.dataset.port = "out";
+      if (workflowState.connectingFrom === node.id) {
+        portOut.classList.add("is-connecting");
+      }
+      ports.append(portOut);
+
+      nodeEl.append(removeButton, shape, label, ports);
+
+      nodeEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+      });
+
+      nodeEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      portOut.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        startWorkflowConnection(node.id, event);
+      });
+
+      bindWorkflowNodeDrag(nodeEl, node);
+      workflowNodesLayer.append(nodeEl);
+      return;
+    }
+
+    if (node.type === "filter") {
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "node-delete filter-delete";
+      removeButton.setAttribute("aria-label", "Excluir bloco");
+      removeButton.textContent = "x";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteWorkflowNode(node.id);
+      });
+
+      const shape = document.createElement("div");
+      shape.className = "filter-shape";
+      const inner = document.createElement("div");
+      inner.className = "filter-inner";
+      inner.textContent = displayTitle || "Filtro";
+      shape.append(inner);
+
+      const meta = document.createElement("div");
+      meta.className = "filter-meta";
+      meta.textContent = describeNodeConfig(node);
+
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      const portIn = document.createElement("span");
+      portIn.className = "node-port in";
+      portIn.dataset.nodeId = node.id;
+      portIn.dataset.port = "in";
+      if (workflowState.connectingFrom && workflowState.connectingFrom !== node.id) {
+        portIn.classList.add("is-available");
+      }
+      const portOut = document.createElement("span");
+      portOut.className = "node-port out";
+      portOut.dataset.nodeId = node.id;
+      portOut.dataset.port = "out";
+      if (workflowState.connectingFrom === node.id) {
+        portOut.classList.add("is-connecting");
+      }
+      ports.append(portIn, portOut);
+
+      nodeEl.append(removeButton, shape, meta, ports);
+
+      nodeEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+      });
+
+      nodeEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      portOut.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        startWorkflowConnection(node.id, event);
+      });
+      portIn.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+
+      bindWorkflowNodeDrag(nodeEl, node);
+      workflowNodesLayer.append(nodeEl);
+      return;
+    }
+
+    if (node.type === "block") {
+      nodeEl.classList.add("is-block");
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "node-delete block-delete";
+      removeButton.setAttribute("aria-label", "Excluir bloco");
+      removeButton.textContent = "x";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteWorkflowNode(node.id);
+      });
+
+      const targets = getBlockDisplayTargets(node);
+      const actionType = Number(node.config?.actionType ?? 0);
+      const targetType = Number(node.config?.targetType ?? 0);
+      const actionLabel = ACTION_LABEL[actionType] || "Acao";
+      const targetLabel = TARGET_LABEL[targetType] || "Alvo";
+      const primaryTarget = targets[0] || "-";
+      const targetCount = targets.length;
+      const targetSuffix =
+        targetCount > 1 ? ` (+${targetCount - 1})` : "";
+
+      const avatar = document.createElement("div");
+      avatar.className = "block-avatar";
+      const icon = document.createElement("img");
+      icon.src =
+        actionType === 1 ? "icons/monitor-unlocked.svg" : "icons/monitor-locked.svg";
+      icon.alt = "";
+      avatar.append(icon);
+
+      const main = document.createElement("div");
+      main.className = "block-main";
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = `${targetLabel}: ${primaryTarget}${targetSuffix}`;
+      const subtitle = document.createElement("div");
+      subtitle.className = "block-sub";
+      const lockCount = actionType === 0 ? targetCount : 0;
+      const unlockCount = actionType === 1 ? targetCount : 0;
+      subtitle.textContent = `Locks: ${lockCount} / Unlocks: ${unlockCount}`;
+      main.append(title, subtitle);
+
+      const meta = document.createElement("div");
+      meta.className = "block-meta";
+      const startDate = node.config?.startDate || null;
+      const endDate = node.config?.endDate || null;
+      const scheduleType = Number(node.config?.scheduleType ?? 0);
+      const nextValue =
+        scheduleType === 0
+          ? startDate
+            ? formatDate(startDate)
+            : "-"
+          : startDate
+          ? formatDate(startDate)
+          : "-";
+      const lastRun = node.lastRunAt
+        ? `${actionLabel} - ${formatDate(node.lastRunAt)}`
+        : "-";
+      const nextLine = document.createElement("div");
+      nextLine.textContent = `Proxima: ${nextValue}`;
+      const lastLine = document.createElement("div");
+      lastLine.textContent = `Ultima: ${lastRun}`;
+      meta.append(nextLine, lastLine);
+
+      const status = document.createElement("div");
+      status.className = "block-status";
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "badge na";
+      const statusValue = node.lastResult?.status || "-";
+      if (node.execStatus === "success") {
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = `Sucesso (${statusValue})`;
+      } else if (node.execStatus === "error") {
+        statusBadge.className = "badge err";
+        statusBadge.textContent = `Erro (${statusValue})`;
+      } else if (node.execStatus === "warning") {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Parcial";
+      } else {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Sem execucao";
+      }
+      status.append(statusBadge);
+
+      const isExpired =
+        endDate && !Number.isNaN(new Date(endDate).getTime())
+          ? new Date(endDate) < new Date()
+          : false;
+      if (isExpired) {
+        const expiredBadge = document.createElement("span");
+        expiredBadge.className = "badge state-expired";
+        expiredBadge.textContent = "Expirado";
+        status.append(expiredBadge);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "block-actions";
+      const scheduleChip = document.createElement("div");
+      scheduleChip.className = "block-chip";
+      const scheduleCount = node.lastResult?.successCount ?? targetCount;
+      scheduleChip.textContent = `Agendamentos (${scheduleCount})`;
+
+      const kebab = document.createElement("button");
+      kebab.type = "button";
+      kebab.className = "icon-btn block-kebab";
+      kebab.setAttribute("aria-label", "Acoes");
+      const kebabIcon = document.createElement("img");
+      kebabIcon.src = "icons/kebab.svg";
+      kebabIcon.alt = "";
+      kebab.append(kebabIcon);
+      kebab.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      actions.append(scheduleChip, kebab);
+
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      const portIn = document.createElement("span");
+      portIn.className = "node-port in";
+      portIn.dataset.nodeId = node.id;
+      portIn.dataset.port = "in";
+      if (workflowState.connectingFrom && workflowState.connectingFrom !== node.id) {
+        portIn.classList.add("is-available");
+      }
+      const portOut = document.createElement("span");
+      portOut.className = "node-port out";
+      portOut.dataset.nodeId = node.id;
+      portOut.dataset.port = "out";
+      if (workflowState.connectingFrom === node.id) {
+        portOut.classList.add("is-connecting");
+      }
+      ports.append(portIn, portOut);
+
+      nodeEl.append(
+        removeButton,
+        avatar,
+        main,
+        meta,
+        status,
+        actions,
+        ports
+      );
+
+      nodeEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+      });
+
+      nodeEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      portOut.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        startWorkflowConnection(node.id, event);
+      });
+      portIn.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+
+      bindWorkflowNodeDrag(nodeEl, node);
+      workflowNodesLayer.append(nodeEl);
+      return;
+    }
+
+    const header = document.createElement("div");
+    header.className = "node-header";
+
+    const title = document.createElement("div");
+    title.className = "node-title";
+    title.textContent = displayTitle;
+
+    const headerActions = document.createElement("div");
+    headerActions.className = "node-actions";
+
+    const tag = document.createElement("div");
+    tag.className = "node-tag";
+    tag.textContent = def?.group || "Bloco";
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "node-delete";
+    removeButton.setAttribute("aria-label", "Excluir bloco");
+    removeButton.textContent = "x";
+    removeButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteWorkflowNode(node.id);
+    });
+
+    headerActions.append(tag, removeButton);
+    header.append(title, headerActions);
+
+    const subtitle = document.createElement("div");
+    subtitle.className = "node-subtitle";
+    subtitle.textContent = def?.subtitle || "Acao configuravel";
+
+    const meta = document.createElement("div");
+    meta.className = "node-meta";
+    meta.textContent = describeNodeConfig(node);
+
+    let tablePreview = null;
+    if (node.type === "table") {
+      tablePreview = document.createElement("div");
+      tablePreview.className = "node-table";
+      const metaInfo = document.createElement("div");
+      metaInfo.className = "node-table-meta";
+      const sourceNode = node.tableData?.sourceNodeId
+        ? workflowState.nodes.find(
+            (item) => item.id === node.tableData.sourceNodeId
+          )
+        : null;
+      const sourceLabel = sourceNode ? getNodeDisplayName(sourceNode) : "Sem fonte";
+      const updatedAt = node.tableData?.updatedAt
+        ? new Date(node.tableData.updatedAt).toLocaleString()
+        : null;
+      const rowsCount = node.tableData?.rows?.length || 0;
+      if (rowsCount > 0) {
+        metaInfo.textContent = `Tabela carregada: ${rowsCount} linhas`;
+        const details = document.createElement("div");
+        details.className = "node-table-meta detail";
+        details.textContent = updatedAt
+          ? `Fonte: ${sourceLabel} - ${updatedAt}`
+          : `Fonte: ${sourceLabel}`;
+        tablePreview.append(metaInfo, details);
+      } else {
+        metaInfo.textContent = "Sem dados.";
+        tablePreview.append(metaInfo);
+      }
+    }
+
+    const ports = document.createElement("div");
+    ports.className = "node-ports";
+    const portIn = document.createElement("span");
+    portIn.className = "node-port in";
+    portIn.dataset.nodeId = node.id;
+    portIn.dataset.port = "in";
+    if (workflowState.connectingFrom && workflowState.connectingFrom !== node.id) {
+      portIn.classList.add("is-available");
+    }
+    const portOut = document.createElement("span");
+    portOut.className = "node-port out";
+    portOut.dataset.nodeId = node.id;
+    portOut.dataset.port = "out";
+    if (workflowState.connectingFrom === node.id) {
+      portOut.classList.add("is-connecting");
+    }
+    ports.append(portIn, portOut);
+
+    if (tablePreview) {
+      nodeEl.append(header, subtitle, meta, tablePreview, ports);
+    } else {
+      nodeEl.append(header, subtitle, meta, ports);
+    }
+
+    nodeEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectWorkflowNode(node.id);
+    });
+
+    nodeEl.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectWorkflowNode(node.id);
+      openWorkflowMenu(event.clientX, event.clientY, node.id);
+    });
+
+    portOut.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      startWorkflowConnection(node.id, event);
+    });
+    portIn.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
+
+    bindWorkflowNodeDrag(nodeEl, node);
+    workflowNodesLayer.append(nodeEl);
+  });
+
+  scheduleWorkflowEdgesRender();
+}
+
+function renderWorkflowInspector(targetBody, node, emptyMessage) {
+  if (!targetBody) return;
+  targetBody.innerHTML = "";
+  if (!node) {
+    const empty = document.createElement("div");
+    empty.className = "inspector-empty";
+    empty.textContent =
+      emptyMessage || "Selecione um bloco no canvas para configurar.";
+    targetBody.append(empty);
+    return;
+  }
+
+  const def = getWorkflowBrick(node.type);
+  const card = document.createElement("div");
+  card.className = "inspector-card";
+
+  const title = document.createElement("div");
+  title.className = "inspector-title";
+  title.textContent = getNodeDisplayName(node, def);
+
+  const type = document.createElement("div");
+  type.className = "inspector-type";
+  type.textContent = def?.group || "Bloco";
+
+  card.append(title, type);
+
+  if (def?.fields?.length) {
+    const form = document.createElement("form");
+    form.className = "inspector-form";
+    form.addEventListener("submit", (event) => event.preventDefault());
+
+    def.fields.forEach((field) => {
+      if (field.dependsOn) {
+        const currentValue = node.config?.[field.dependsOn.key];
+        const expectedValues = field.dependsOn.values || [field.dependsOn.value];
+        if (!expectedValues.includes(currentValue)) {
+          return;
+        }
+      }
+      const label = document.createElement("label");
+      label.textContent = field.label;
+
+      let input = null;
+      if (field.type === "conditions") {
+        ensureFilterConditions(node);
+        const wrapper = document.createElement("div");
+        wrapper.className = "conditions-editor";
+
+        const list = document.createElement("div");
+        list.className = "conditions-list";
+
+        const operators = [
+          { value: "==", label: "==" },
+          { value: "!=", label: "!=" },
+          { value: ">=", label: ">=" },
+          { value: "<=", label: "<=" },
+          { value: "contains", label: "contains" },
+          { value: "not contains", label: "not contains" },
+        ];
+
+        node.config.conditions.forEach((condition, index) => {
+          const row = document.createElement("div");
+          row.className = "conditions-row";
+
+          const fieldInput = document.createElement("input");
+          fieldInput.type = "text";
+          fieldInput.placeholder = "campo (ex: username)";
+          fieldInput.value = condition.field || "";
+
+          const operatorSelect = document.createElement("select");
+          operators.forEach((operator) => {
+            const option = document.createElement("option");
+            option.value = operator.value;
+            option.textContent = operator.label;
+            operatorSelect.append(option);
+          });
+          operatorSelect.value = condition.operator || "==";
+
+          const valueInput = document.createElement("input");
+          valueInput.type = "text";
+          valueInput.placeholder = "valor";
+          valueInput.value = condition.value ?? "";
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "ghost conditions-remove";
+          removeBtn.textContent = "x";
+          removeBtn.addEventListener("click", () => {
+            node.config.conditions.splice(index, 1);
+            if (node.config.conditions.length === 0) {
+              node.config.conditions.push(normalizeConditionRow({}));
+            }
+            saveWorkflowState();
+            renderWorkflow();
+            renderWorkflowInspectorPanel();
+          });
+
+          const updateRow = () => {
+            node.config.conditions[index] = normalizeConditionRow({
+              field: fieldInput.value,
+              operator: operatorSelect.value,
+              value: valueInput.value,
+            });
+            saveWorkflowState();
+            renderWorkflow();
+          };
+
+          fieldInput.addEventListener("change", updateRow);
+          operatorSelect.addEventListener("change", updateRow);
+          valueInput.addEventListener("change", updateRow);
+
+          row.append(fieldInput, operatorSelect, valueInput, removeBtn);
+          list.append(row);
+        });
+
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "ghost conditions-add";
+        addBtn.textContent = "Adicionar condicao";
+        addBtn.addEventListener("click", () => {
+          node.config.conditions.push(normalizeConditionRow({}));
+          saveWorkflowState();
+          renderWorkflow();
+          renderWorkflowInspectorPanel();
+        });
+
+        wrapper.append(list, addBtn);
+        input = wrapper;
+      } else if (field.type === "select") {
+        input = document.createElement("select");
+        (field.options || []).forEach((option) => {
+          const optionEl = document.createElement("option");
+          optionEl.value = option.value;
+          optionEl.textContent = option.label;
+          input.append(optionEl);
+        });
+        const currentValue =
+          node.config?.[field.key] ?? field.default ?? "";
+        input.value = currentValue;
+      } else if (field.type === "datetime") {
+        input = document.createElement("input");
+        input.type = "datetime-local";
+        const currentValue = node.config?.[field.key] ?? "";
+        input.value = currentValue ? toInputDateTime(currentValue) || currentValue : "";
+      } else if (field.type === "time") {
+        input = document.createElement("input");
+        input.type = "time";
+        const currentValue = node.config?.[field.key] ?? "";
+        input.value = currentValue ? normalizeTime(currentValue) : "";
+      } else if (field.type === "textarea") {
+        input = document.createElement("textarea");
+        input.placeholder = field.placeholder || "";
+        input.value = node.config?.[field.key] ?? "";
+      } else {
+        input = document.createElement("input");
+        input.type = field.type === "number" ? "number" : "text";
+        input.placeholder = field.placeholder || "";
+        input.value = node.config?.[field.key] ?? "";
+      }
+
+      if (
+        field.type !== "conditions" &&
+        field.default !== undefined &&
+        (input.value === "" || input.value === null)
+      ) {
+        input.value = field.default;
+        node.config[field.key] = field.default;
+      }
+
+      if (field.type !== "conditions") {
+        input.addEventListener("change", (event) => {
+          node.config[field.key] = event.target.value;
+          saveWorkflowState();
+          renderWorkflow();
+          renderWorkflowInspectorPanel();
+          renderWorkflowModal();
+        });
+      }
+
+      label.append(input);
+      form.append(label);
+    });
+
+    card.append(form);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "primary";
+    saveButton.textContent = "Salvar";
+    saveButton.addEventListener("click", () => {
+      saveWorkflowState();
+      setWorkflowStatus("Configuracoes salvas.", "success");
+      if (workflowModal?.classList.contains("is-open")) {
+        closeWorkflowModal();
+      }
+    });
+    actions.append(saveButton);
+    card.append(actions);
+  } else {
+    const info = document.createElement("div");
+    info.className = "node-subtitle";
+    info.textContent = "Sem configuracoes para este bloco.";
+    card.append(info);
+  }
+
+  targetBody.append(card);
+}
+
+function renderWorkflowInspectorPanel() {
+  const node = workflowState.nodes.find(
+    (item) => item.id === workflowState.selectedNodeId
+  );
+  renderWorkflowInspector(
+    workflowInspectorBody,
+    node,
+    "Selecione um bloco no canvas para configurar."
+  );
+}
+
+function renderWorkflowModal() {
+  if (!workflowModal || !workflowModalBody) return;
+  if (!workflowModal.classList.contains("is-open")) return;
+  const node = workflowState.nodes.find(
+    (item) => item.id === workflowModalNodeId
+  );
+  if (!node) {
+    closeWorkflowModal();
+    return;
+  }
+  renderWorkflowInspector(
+    workflowModalBody,
+    node,
+    "Selecione um bloco para configurar."
+  );
+}
+
+function initializeWorkflow() {
+  if (!workflowPalette || !workflowCanvas) return;
+  renderWorkflowPalette();
+  loadWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+
+  workflowPalette.addEventListener("dragstart", (event) => {
+    const tile = event.target.closest(".brick-tile");
+    if (!tile) return;
+    event.dataTransfer.setData("text/plain", tile.dataset.brick);
+    event.dataTransfer.effectAllowed = "copy";
+  });
+
+  workflowPalette.addEventListener("click", (event) => {
+    const tile = event.target.closest(".brick-tile");
+    if (!tile) return;
+    createWorkflowNode(tile.dataset.brick, getDefaultNodePosition());
+  });
+
+  workflowCanvas.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+
+  workflowCanvas.addEventListener("dragenter", () => {
+    workflowCanvas.classList.add("is-dragover");
+  });
+
+  workflowCanvas.addEventListener("dragleave", (event) => {
+    if (!workflowCanvas.contains(event.relatedTarget)) {
+      workflowCanvas.classList.remove("is-dragover");
+    }
+  });
+
+  workflowCanvas.addEventListener("drop", (event) => {
+    event.preventDefault();
+    workflowCanvas.classList.remove("is-dragover");
+    const type = event.dataTransfer.getData("text/plain");
+    if (!type) return;
+    createWorkflowNode(type, getDropPosition(event));
+  });
+
+  workflowCanvas.addEventListener("click", (event) => {
+    if (event.target.closest(".workflow-node")) return;
+    workflowState.selectedNodeId = null;
+    workflowState.connectingFrom = null;
+    workflowState.connectingPosition = null;
+    if (workflowConnectingHoverPort) {
+      workflowConnectingHoverPort.classList.remove("is-hover");
+      workflowConnectingHoverPort = null;
+    }
+    saveWorkflowState();
+    renderWorkflow();
+    renderWorkflowInspectorPanel();
+    closeWorkflowEdgeMenu();
+  });
+
+  window.addEventListener("pointermove", (event) => {
+    if (!workflowState.connectingFrom) return;
+    updateWorkflowConnectingPosition(event.clientX, event.clientY);
+  });
+
+  window.addEventListener("pointerup", (event) => {
+    if (!workflowState.connectingFrom) return;
+    finishWorkflowConnection(event);
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeWorkflowMenu();
+      closeWorkflowEdgeMenu();
+      if (workflowModal?.classList.contains("is-open")) {
+        closeWorkflowModal();
+      }
+      clearWorkflowConnection();
+    }
+  });
+
+  if (workflowEdgesLayer) {
+    workflowEdgesLayer.addEventListener("contextmenu", (event) => {
+      const edgeEl = event.target.closest(".workflow-edge");
+      if (!edgeEl) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeWorkflowMenu();
+      closeWorkflowEdgeMenu();
+      const edgeId = edgeEl.dataset.edgeId;
+      const edge = workflowState.edges.find((item) => item.id === edgeId);
+      if (!edge) return;
+      openWorkflowEdgeMenu(event.clientX, event.clientY, edge);
+    });
+  }
+
+  if (workflowClearButton) {
+    workflowClearButton.addEventListener("click", async () => {
+      const confirmed = await openConfirmModal({
+        title: "Limpar fluxo",
+        message: "Deseja apagar todos os blocos e conexoes?",
+        confirmText: "Limpar",
+      });
+      if (!confirmed) return;
+      workflowState.nodes = [];
+      workflowState.edges = [];
+      workflowState.selectedNodeId = null;
+      workflowState.connectingFrom = null;
+      saveWorkflowState();
+      renderWorkflow();
+      renderWorkflowInspectorPanel();
+      setWorkflowStatus("Fluxo limpo.", "success");
+    });
+  }
+
+  if (workflowSaveButton) {
+    workflowSaveButton.addEventListener("click", () => {
+      openWorkflowSaveModal();
+    });
+  }
+  if (workflowLoadButton) {
+    workflowLoadButton.addEventListener("click", () => {
+      openWorkflowLoadModal();
+    });
+  }
+
+  if (workflowRunButton) {
+    workflowRunButton.addEventListener("click", () => {
+      const startNode = workflowState.nodes.find((node) => node.type === "start");
+      if (!startNode) {
+        setWorkflowStatus("Adicione um bloco Inicio para executar.", "warning");
+        return;
+      }
+      executeWorkflowFromStart(startNode);
+    });
+  }
+
+  if (workflowMenu) {
+    workflowMenu.addEventListener("click", (event) => {
+      const action = event.target.dataset.action;
+      if (!action) return;
+      if (action === "properties") {
+        if (workflowMenuNodeId) {
+          openWorkflowModal(workflowMenuNodeId);
+        }
+      }
+      if (action === "run") {
+        const node = workflowState.nodes.find(
+          (item) => item.id === workflowMenuNodeId
+        );
+        if (node && node.type === "start") {
+          executeWorkflowFromStart(node);
+        }
+      }
+      if (action === "view-response") {
+        if (workflowMenuNodeId) {
+          openWorkflowResponseModal(workflowMenuNodeId);
+        }
+      }
+      if (action === "refresh-table") {
+        const node = workflowState.nodes.find(
+          (item) => item.id === workflowMenuNodeId
+        );
+        if (node && node.type === "table") {
+          refreshTableFromUpstream(node);
+        }
+      }
+      if (action === "view-table") {
+        if (workflowMenuNodeId) {
+          openWorkflowTableModal(workflowMenuNodeId);
+        }
+      }
+      if (action === "delete") {
+        deleteWorkflowNode(workflowMenuNodeId);
+      }
+      closeWorkflowMenu();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (workflowMenu.contains(event.target)) return;
+      closeWorkflowMenu();
+    });
+  }
+
+  if (workflowLoadBody) {
+    workflowLoadBody.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action='load']");
+      if (!button) return;
+      loadWorkflowFromServer(button.dataset.id);
+    });
+  }
+
+  if (workflowModalClose) {
+    workflowModalClose.addEventListener("click", () => {
+      closeWorkflowModal();
+    });
+  }
+
+  if (workflowResponseClose) {
+    workflowResponseClose.addEventListener("click", () => {
+      closeWorkflowResponseModal();
+    });
+  }
+
+  if (workflowTableClose) {
+    workflowTableClose.addEventListener("click", () => {
+      closeWorkflowTableModal();
+    });
+  }
+  if (workflowLoadClose) {
+    workflowLoadClose.addEventListener("click", () => {
+      closeWorkflowLoadModal();
+    });
+  }
+  if (workflowLoadCancel) {
+    workflowLoadCancel.addEventListener("click", () => {
+      closeWorkflowLoadModal();
+    });
+  }
+  if (workflowLoadRefresh) {
+    workflowLoadRefresh.addEventListener("click", () => {
+      fetchWorkflowList();
+    });
+  }
+  if (workflowSaveClose) {
+    workflowSaveClose.addEventListener("click", () => {
+      closeWorkflowSaveModal();
+    });
+  }
+  if (workflowSaveCancel) {
+    workflowSaveCancel.addEventListener("click", () => {
+      closeWorkflowSaveModal();
+    });
+  }
+  if (workflowSaveConfirm) {
+    workflowSaveConfirm.addEventListener("click", () => {
+      saveWorkflowToServer(workflowSaveName?.value || "");
+    });
+  }
+  if (workflowSaveName) {
+    workflowSaveName.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveWorkflowToServer(workflowSaveName.value || "");
+      }
+    });
+  }
+
+  if (workflowModal) {
+    workflowModal.addEventListener("click", (event) => {
+      if (event.target === workflowModal) {
+        closeWorkflowModal();
+      }
+    });
+  }
+
+  if (workflowResponseModal) {
+    workflowResponseModal.addEventListener("click", (event) => {
+      if (event.target === workflowResponseModal) {
+        closeWorkflowResponseModal();
+      }
+    });
+  }
+
+  if (workflowTableModal) {
+    workflowTableModal.addEventListener("click", (event) => {
+      if (event.target === workflowTableModal) {
+        closeWorkflowTableModal();
+      }
+    });
+  }
+  if (workflowSaveModal) {
+    workflowSaveModal.addEventListener("click", (event) => {
+      if (event.target === workflowSaveModal) {
+        closeWorkflowSaveModal();
+      }
+    });
+  }
+  if (workflowLoadModal) {
+    workflowLoadModal.addEventListener("click", (event) => {
+      if (event.target === workflowLoadModal) {
+        closeWorkflowLoadModal();
+      }
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    scheduleWorkflowEdgesRender();
+  });
 }
 
 navButtons.forEach((btn) => {
@@ -2870,4 +6207,5 @@ async function initializeApp() {
   await loadControl();
 }
 
+initializeWorkflow();
 initializeApp();
