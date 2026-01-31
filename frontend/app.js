@@ -124,6 +124,9 @@ const workflowStatus = document.getElementById("workflow-status");
 const workflowClearButton = document.getElementById("workflow-clear");
 const workflowSaveButton = document.getElementById("workflow-save");
 const workflowRunButton = document.getElementById("workflow-run");
+const workflowZoomOut = document.getElementById("workflow-zoom-out");
+const workflowZoomReset = document.getElementById("workflow-zoom-reset");
+const workflowZoomIn = document.getElementById("workflow-zoom-in");
 const workflowEmpty = document.getElementById("workflow-empty");
 
 let editingId = null;
@@ -158,6 +161,18 @@ const workflowState = {
   connectingPosition: null,
   loaded: false,
 };
+const workflowViewport = {
+  scale: 1,
+  x: 0,
+  y: 0,
+  minScale: 0.4,
+  maxScale: 2,
+};
+let workflowIsPanning = false;
+let workflowPanStart = null;
+let workflowSpaceDown = false;
+let workflowPanCandidate = null;
+let workflowIgnoreClick = false;
 let workflowEdgesRaf = null;
 let workflowConnectingHoverPort = null;
 let workflowMenuNodeId = null;
@@ -640,6 +655,68 @@ function snapToGrid(value) {
   return Math.round(value / grid) * grid;
 }
 
+function clampScale(value) {
+  return Math.min(
+    workflowViewport.maxScale,
+    Math.max(workflowViewport.minScale, value)
+  );
+}
+
+function getCanvasRect() {
+  if (!workflowCanvas) return null;
+  return workflowCanvas.getBoundingClientRect();
+}
+
+function screenToWorld(clientX, clientY) {
+  const rect = getCanvasRect();
+  if (!rect) return { x: 0, y: 0 };
+  return {
+    x: (clientX - rect.left - workflowViewport.x) / workflowViewport.scale,
+    y: (clientY - rect.top - workflowViewport.y) / workflowViewport.scale,
+  };
+}
+
+function applyWorkflowViewport() {
+  if (!workflowNodesLayer || !workflowCanvas) return;
+  workflowNodesLayer.style.transform = `translate(${workflowViewport.x}px, ${workflowViewport.y}px) scale(${workflowViewport.scale})`;
+  workflowNodesLayer.style.transformOrigin = "0 0";
+  const gridSize = 24 * workflowViewport.scale;
+  workflowCanvas.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+  workflowCanvas.style.backgroundPosition = `${workflowViewport.x}px ${workflowViewport.y}px`;
+  scheduleWorkflowEdgesRender();
+  updateWorkflowZoomLabel();
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
+function updateWorkflowZoomLabel() {
+  if (!workflowZoomReset) return;
+  const percent = Math.round(workflowViewport.scale * 100);
+  workflowZoomReset.textContent = `${percent}%`;
+}
+
+function setWorkflowZoom(nextScale, clientX, clientY) {
+  const rect = getCanvasRect();
+  if (!rect) return;
+  const scale = clampScale(nextScale);
+  const focusX = clientX ?? rect.left + rect.width / 2;
+  const focusY = clientY ?? rect.top + rect.height / 2;
+  const world = screenToWorld(focusX, focusY);
+  workflowViewport.scale = scale;
+  workflowViewport.x = focusX - rect.left - world.x * scale;
+  workflowViewport.y = focusY - rect.top - world.y * scale;
+  applyWorkflowViewport();
+}
+
 function loadWorkflowState() {
   if (workflowState.loaded) return;
   workflowState.loaded = true;
@@ -929,8 +1006,9 @@ async function loadWorkflowFromServer(id) {
 function getDefaultNodePosition() {
   if (!workflowCanvas) return { x: 40, y: 40 };
   const rect = workflowCanvas.getBoundingClientRect();
-  const baseX = rect.width ? rect.width / 2 - 120 : 40;
-  const baseY = rect.height ? rect.height / 2 - 40 : 40;
+  const center = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  const baseX = center.x ? center.x - 120 : 40;
+  const baseY = center.y ? center.y - 40 : 40;
   const offset = (workflowState.nodes.length % 6) * 18;
   return {
     x: snapToGrid(Math.max(16, baseX + offset)),
@@ -940,9 +1018,9 @@ function getDefaultNodePosition() {
 
 function getDropPosition(event) {
   if (!workflowCanvas) return { x: 40, y: 40 };
-  const rect = workflowCanvas.getBoundingClientRect();
-  const rawX = event.clientX - rect.left - 120;
-  const rawY = event.clientY - rect.top - 30;
+  const world = screenToWorld(event.clientX, event.clientY);
+  const rawX = world.x - 120;
+  const rawY = world.y - 30;
   return {
     x: snapToGrid(Math.max(16, rawX)),
     y: snapToGrid(Math.max(16, rawY)),
@@ -1498,6 +1576,7 @@ function deleteWorkflowNode(nodeId) {
 
 function openWorkflowMenu(x, y, nodeId) {
   if (!workflowMenu) return;
+  closeWorkflowEdgeMenu();
   workflowMenuNodeId = nodeId;
   const node = workflowState.nodes.find((item) => item.id === nodeId);
   const responseItem = workflowMenu.querySelector(
@@ -2508,26 +2587,27 @@ function bindWorkflowNodeDrag(nodeEl, node) {
     if (event.target.closest(".node-port")) {
       return;
     }
+    if (workflowSpaceDown) {
+      return;
+    }
     if (workflowState.connectingFrom) {
       clearWorkflowConnection();
     }
     if (event.button !== 0) return;
     event.preventDefault();
     selectWorkflowNode(node.id, { render: false });
-    const canvasRect = workflowCanvas?.getBoundingClientRect();
-    if (!canvasRect) return;
-    const offsetX = event.clientX - canvasRect.left - node.position.x;
-    const offsetY = event.clientY - canvasRect.top - node.position.y;
+    const start = screenToWorld(event.clientX, event.clientY);
+    const offsetX = start.x - node.position.x;
+    const offsetY = start.y - node.position.y;
     const pointerId = event.pointerId;
     if (nodeEl.setPointerCapture) {
       nodeEl.setPointerCapture(pointerId);
     }
 
     const handleMove = (moveEvent) => {
-      const rect = workflowCanvas?.getBoundingClientRect();
-      if (!rect) return;
-      const nextX = moveEvent.clientX - rect.left - offsetX;
-      const nextY = moveEvent.clientY - rect.top - offsetY;
+      const next = screenToWorld(moveEvent.clientX, moveEvent.clientY);
+      const nextX = next.x - offsetX;
+      const nextY = next.y - offsetY;
       node.position.x = Math.max(8, nextX);
       node.position.y = Math.max(8, nextY);
       nodeEl.style.left = `${node.position.x}px`;
@@ -3267,6 +3347,7 @@ function initializeWorkflow() {
   loadWorkflowState();
   renderWorkflow();
   renderWorkflowInspectorPanel();
+  applyWorkflowViewport();
 
   workflowPalette.addEventListener("dragstart", (event) => {
     const tile = event.target.closest(".brick-tile");
@@ -3304,7 +3385,12 @@ function initializeWorkflow() {
   });
 
   workflowCanvas.addEventListener("click", (event) => {
+    if (workflowIgnoreClick) {
+      workflowIgnoreClick = false;
+      return;
+    }
     if (event.target.closest(".workflow-node")) return;
+    if (event.target.closest(".workflow-edge")) return;
     workflowState.selectedNodeId = null;
     workflowState.connectingFrom = null;
     workflowState.connectingPosition = null;
@@ -3318,17 +3404,82 @@ function initializeWorkflow() {
     closeWorkflowEdgeMenu();
   });
 
+  workflowCanvas.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".workflow-node")) return;
+    if (event.target.closest(".workflow-edge")) return;
+    if (workflowState.connectingFrom) return;
+    const isLeft = event.button === 0;
+    const isMiddle = event.button === 1;
+    if (!isLeft && !isMiddle) return;
+    workflowPanCandidate = {
+      x: event.clientX,
+      y: event.clientY,
+      startX: workflowViewport.x,
+      startY: workflowViewport.y,
+      immediate: isMiddle || workflowSpaceDown,
+    };
+    if (workflowPanCandidate.immediate) {
+      event.preventDefault();
+      workflowIsPanning = true;
+      workflowPanStart = workflowPanCandidate;
+      workflowCanvas.classList.add("is-panning");
+    }
+  });
+
+  workflowCanvas.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    const factor = direction > 0 ? 1.08 : 0.92;
+    setWorkflowZoom(workflowViewport.scale * factor, event.clientX, event.clientY);
+  }, { passive: false });
+
   window.addEventListener("pointermove", (event) => {
+    if (!workflowIsPanning && workflowPanCandidate && !workflowPanCandidate.immediate) {
+      const dx = event.clientX - workflowPanCandidate.x;
+      const dy = event.clientY - workflowPanCandidate.y;
+      if (Math.hypot(dx, dy) > 3) {
+        workflowIsPanning = true;
+        workflowPanStart = workflowPanCandidate;
+        workflowCanvas.classList.add("is-panning");
+        workflowIgnoreClick = true;
+      }
+    }
+    if (workflowIsPanning && workflowPanStart) {
+      workflowViewport.x =
+        workflowPanStart.startX + (event.clientX - workflowPanStart.x);
+      workflowViewport.y =
+        workflowPanStart.startY + (event.clientY - workflowPanStart.y);
+      applyWorkflowViewport();
+      return;
+    }
     if (!workflowState.connectingFrom) return;
     updateWorkflowConnectingPosition(event.clientX, event.clientY);
   });
 
   window.addEventListener("pointerup", (event) => {
+    if (workflowIsPanning) {
+      workflowIsPanning = false;
+      workflowPanStart = null;
+      workflowPanCandidate = null;
+      workflowCanvas.classList.remove("is-panning");
+      workflowIgnoreClick = true;
+      setTimeout(() => {
+        workflowIgnoreClick = false;
+      }, 0);
+      return;
+    }
+    workflowPanCandidate = null;
     if (!workflowState.connectingFrom) return;
     finishWorkflowConnection(event);
   });
 
   window.addEventListener("keydown", (event) => {
+    if (event.code === "Space" && !isTypingTarget(event.target)) {
+      workflowSpaceDown = true;
+      workflowCanvas?.classList.add("is-pan-ready");
+      event.preventDefault();
+    }
     if (event.key === "Escape") {
       closeWorkflowMenu();
       closeWorkflowEdgeMenu();
@@ -3336,6 +3487,13 @@ function initializeWorkflow() {
         closeWorkflowModal();
       }
       clearWorkflowConnection();
+    }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    if (event.code === "Space") {
+      workflowSpaceDown = false;
+      workflowCanvas?.classList.remove("is-pan-ready");
     }
   });
 
@@ -3370,6 +3528,25 @@ function initializeWorkflow() {
       renderWorkflow();
       renderWorkflowInspectorPanel();
       setWorkflowStatus("Fluxo limpo.", "success");
+    });
+  }
+
+  if (workflowZoomOut) {
+    workflowZoomOut.addEventListener("click", () => {
+      setWorkflowZoom(workflowViewport.scale - 0.1);
+    });
+  }
+  if (workflowZoomIn) {
+    workflowZoomIn.addEventListener("click", () => {
+      setWorkflowZoom(workflowViewport.scale + 0.1);
+    });
+  }
+  if (workflowZoomReset) {
+    workflowZoomReset.addEventListener("click", () => {
+      workflowViewport.scale = 1;
+      workflowViewport.x = 0;
+      workflowViewport.y = 0;
+      applyWorkflowViewport();
     });
   }
 
@@ -3439,6 +3616,21 @@ function initializeWorkflow() {
     document.addEventListener("click", (event) => {
       if (workflowMenu.contains(event.target)) return;
       closeWorkflowMenu();
+    });
+  }
+
+  if (workflowEdgeMenu) {
+    workflowEdgeMenu.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-action]")?.dataset?.action;
+      if (action === "delete-edge" && workflowMenuEdge?.id) {
+        deleteWorkflowEdge(workflowMenuEdge.id);
+      }
+      closeWorkflowEdgeMenu();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (workflowEdgeMenu.contains(event.target)) return;
+      closeWorkflowEdgeMenu();
     });
   }
 

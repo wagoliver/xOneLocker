@@ -229,6 +229,17 @@ body.workflow-active main {
   align-items: center;
 }
 
+.zoom-controls {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.zoom-controls #workflow-zoom-reset {
+  min-width: 56px;
+  text-align: center;
+}
+
 h1 {
   margin: 0 0 4px;
   font-size: 26px;
@@ -955,6 +966,14 @@ textarea::placeholder {
   background-size: 24px 24px;
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.workflow-canvas.is-pan-ready {
+  cursor: grab;
+}
+
+.workflow-canvas.is-panning {
+  cursor: grabbing;
 }
 
 .workflow-canvas.is-dragover {
