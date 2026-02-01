@@ -172,6 +172,7 @@ const WORKFLOW_STORAGE_KEY = "locker-workflow-draft";
 const WORKFLOW_NAME_KEY = "locker-workflow-name";
 const WORKFLOW_ID_KEY = "locker-workflow-id";
 const WORKFLOW_SCHEDULE_KEY = "locker-workflow-schedule";
+const XONE_CONFIG_KEY = "locker-xone-config";
 const workflowState = {
   nodes: [],
   edges: [],
@@ -198,6 +199,8 @@ let workflowConnectingHoverPort = null;
 let workflowMenuNodeId = null;
 let workflowMenuEdge = null;
 let workflowScheduleMenuWorkflowId = null;
+let xoneConfigCache = null;
+let xoneConfigLoading = null;
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowTableNodeId = null;
@@ -341,6 +344,70 @@ function saveWorkflowScheduleDraft(data) {
     return;
   }
   window.localStorage.setItem(WORKFLOW_SCHEDULE_KEY, JSON.stringify(data));
+}
+
+function getXoneConfigCache() {
+  if (xoneConfigCache) return xoneConfigCache;
+  const raw = window.localStorage.getItem(XONE_CONFIG_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      xoneConfigCache = parsed;
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function setXoneConfigCache(data) {
+  xoneConfigCache = data || null;
+  if (!data) {
+    window.localStorage.removeItem(XONE_CONFIG_KEY);
+    return;
+  }
+  window.localStorage.setItem(XONE_CONFIG_KEY, JSON.stringify(data));
+}
+
+async function fetchXoneConfig() {
+  if (xoneConfigLoading) return xoneConfigLoading;
+  xoneConfigLoading = (async () => {
+    try {
+      const response = await apiFetch("/api/xone-config");
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Falha ao carregar configuracao xOne.");
+      }
+      const data = await response.json();
+      setXoneConfigCache(data);
+      return data;
+    } finally {
+      xoneConfigLoading = null;
+    }
+  })();
+  return xoneConfigLoading;
+}
+
+async function saveXoneConfig(patch) {
+  const response = await apiFetch("/api/xone-config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    throw new Error(data?.error || text || "Falha ao salvar configuracao xOne.");
+  }
+  setXoneConfigCache(data);
+  return data;
 }
 
 function updateWorkflowScheduleVisibility() {
@@ -673,6 +740,111 @@ const WORKFLOW_BRICKS = [
         type: "text",
         placeholder: "Cole o token",
         excludeFromSummary: true,
+      },
+      {
+        key: "timeoutSeconds",
+        label: "Timeout (segundos)",
+        type: "number",
+        placeholder: "60",
+        default: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS),
+      },
+    ],
+  },
+  {
+    type: "xone-data",
+    title: "xOne Data",
+    subtitle: "Coleta dados da API xOne",
+    group: "Integracao",
+    summary: (node) => {
+      const endpoint = node.config?.endpoint || "-";
+      const checkpoint = node.config?.checkpointEnabled !== "no";
+      return checkpoint
+        ? `Endpoint: ${endpoint} (incremental)`
+        : `Endpoint: ${endpoint}`;
+    },
+    fields: [
+      {
+        key: "tokenUrl",
+        label: "Token URL",
+        type: "text",
+        placeholder: "https://keycloak.xonecloud.com/realms/xone-cloud/protocol/openid-connect/token",
+        storage: "xone-config",
+      },
+      {
+        key: "apiBase",
+        label: "API base",
+        type: "text",
+        placeholder: "https://api.xonecloud.com/",
+        storage: "xone-config",
+      },
+      {
+        key: "clientId",
+        label: "Client ID",
+        type: "text",
+        placeholder: "Client ID",
+        storage: "xone-config",
+      },
+      {
+        key: "clientSecret",
+        label: "Client Secret",
+        type: "text",
+        inputType: "password",
+        placeholder: "Client Secret",
+        storage: "xone-config",
+      },
+      {
+        key: "scope",
+        label: "Scope",
+        type: "text",
+        placeholder: "Opcional",
+        storage: "xone-config",
+      },
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: xOne Usuarios",
+      },
+      {
+        key: "endpoint",
+        label: "Endpoint",
+        type: "text",
+        placeholder: "analytics/usuarios",
+      },
+      {
+        key: "checkpointEnabled",
+        label: "Buscar apenas novos registros",
+        type: "select",
+        options: [
+          { value: "yes", label: "Sim" },
+          { value: "no", label: "Nao" },
+        ],
+        default: "yes",
+      },
+      {
+        key: "checkpointField",
+        label: "Campo de checkpoint",
+        type: "text",
+        placeholder: "created_date_local",
+        default: "created_date_local",
+        dependsOn: { key: "checkpointEnabled", values: ["yes"] },
+      },
+      {
+        key: "checkpointOperator",
+        label: "Operador do checkpoint",
+        type: "select",
+        options: [
+          { value: "gt", label: "gt" },
+          { value: "gte", label: "gte" },
+        ],
+        default: "gt",
+        dependsOn: { key: "checkpointEnabled", values: ["yes"] },
+      },
+      {
+        key: "limit",
+        label: "Limite (opcional)",
+        type: "number",
+        placeholder: "100",
       },
       {
         key: "timeoutSeconds",
@@ -1262,6 +1434,10 @@ function getBrickIconSvg(type) {
           <path d="M13 12l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
           <path d="M13 12l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
         </svg>
+      `;
+    case "xone-data":
+      return `
+        <img src="icons/xone-icon-x-square.svg" alt="" />
       `;
     case "xone-collaborators":
       return `
@@ -2245,7 +2421,9 @@ function openWorkflowMenu(x, y, nodeId) {
   );
   const isStart = node?.type === "start";
   const isWebhook =
-    node?.type === "webhook" || node?.type === "xone-collaborators";
+    node?.type === "webhook" ||
+    node?.type === "xone-collaborators" ||
+    node?.type === "xone-data";
   const isBlock = node?.type === "block";
   const isTable = node?.type === "table";
   const canViewResponse = isWebhook || isBlock;
@@ -2896,13 +3074,29 @@ async function executeWorkflowFromStart(startNode) {
         const result = await executeWebhookNode(node);
         if (node.execStatus === "warning") {
           hasWarning = true;
-          setWorkflowStatus("Parametros faltando no webhook.", "warning");
+          setWorkflowStatus("Parametros faltando na integracao.", "warning");
           break;
         }
         if (!result.ok || result.timedOut) {
           const errorMessage = result.timedOut
             ? "Timeout no webhook."
-            : "Falha ao executar webhook.";
+            : "Falha ao executar integracao.";
+          setWorkflowStatus(errorMessage, "error");
+          setNodeExecutionStatus(startNode, "error");
+          renderWorkflow();
+          return;
+        }
+      } else if (node.type === "xone-data") {
+        const result = await executeXoneDataNode(node);
+        if (node.execStatus === "warning") {
+          hasWarning = true;
+          setWorkflowStatus("Parametros faltando no xOne Data.", "warning");
+          break;
+        }
+        if (!result.ok || result.timedOut) {
+          const errorMessage = result.timedOut
+            ? "Timeout no xOne Data."
+            : "Falha ao coletar dados xOne.";
           setWorkflowStatus(errorMessage, "error");
           setNodeExecutionStatus(startNode, "error");
           renderWorkflow();
@@ -3393,6 +3587,101 @@ async function executeWebhookNode(node) {
   node.lastRunAt = new Date().toISOString();
   const item = getNodeDefaultItem(node, result);
   setNodeOutputItem(node, item);
+  propagateNodeOutput(node);
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  renderWorkflowResponseModal();
+
+  return result;
+}
+
+async function executeXoneDataNode(node) {
+  const start = performance.now();
+  const timeoutSeconds = normalizeTimeoutSeconds(node.config?.timeoutSeconds);
+  const result = {
+    kind: "xone-data",
+    ok: false,
+    status: null,
+    statusText: "",
+    url: "/api/xone-data",
+    elapsedMs: null,
+    bodyText: "",
+    bodyJson: null,
+    error: null,
+    timedOut: false,
+  };
+
+  const endpoint = String(node.config?.endpoint || "").trim();
+  if (!endpoint) {
+    result.error = "Endpoint obrigatorio.";
+    setNodeExecutionStatus(node, "warning");
+    node.lastResult = result;
+    node.lastRunAt = new Date().toISOString();
+    setNodeOutputItem(node, []);
+    propagateNodeOutput(node);
+    saveWorkflowState();
+    renderWorkflow();
+    renderWorkflowInspectorPanel();
+    renderWorkflowResponseModal();
+    return result;
+  }
+
+  const payload = {
+    endpoint,
+    checkpointEnabled: node.config?.checkpointEnabled !== "no",
+    checkpointField: String(node.config?.checkpointField || "").trim() || "created_date_local",
+    checkpointOperator: String(node.config?.checkpointOperator || "").trim() || "gt",
+    limit: normalizeNumber(node.config?.limit),
+    timeoutSeconds,
+  };
+
+  try {
+    const response = await apiFetch("/api/xone-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const elapsed = Math.round(performance.now() - start);
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    result.ok = response.ok;
+    result.status = response.status;
+    result.statusText = response.statusText;
+    result.elapsedMs = elapsed;
+    result.bodyText =
+      text.length > WORKFLOW_RESULT_LIMIT
+        ? `${text.slice(0, WORKFLOW_RESULT_LIMIT)}\n...`
+        : text;
+    result.bodyJson = json;
+    if (!response.ok) {
+      result.error = json?.error || text || "Falha ao coletar dados xOne.";
+      setNodeExecutionStatus(node, "error");
+    } else {
+      setNodeExecutionStatus(node, "success");
+    }
+  } catch (err) {
+    const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
+    result.error = isTimeout
+      ? `Timeout excedido (${timeoutSeconds}s).`
+      : err?.message || "Falha ao coletar dados xOne.";
+    result.timedOut = isTimeout;
+    if (String(result.error).toLowerCase().includes("obrigator")) {
+      setNodeExecutionStatus(node, "warning");
+    } else {
+      setNodeExecutionStatus(node, "error");
+    }
+  }
+
+  node.lastResult = result;
+  node.lastRunAt = new Date().toISOString();
+  const records = Array.isArray(result.bodyJson) ? result.bodyJson : [];
+  setNodeOutputItem(node, records);
   propagateNodeOutput(node);
   saveWorkflowState();
   renderWorkflow();
@@ -4140,12 +4429,42 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         input.value = node.config?.[field.key] ?? "";
       } else {
         input = document.createElement("input");
-        input.type = field.type === "number" ? "number" : "text";
+        if (field.type === "number") {
+          input.type = "number";
+        } else {
+          input.type = field.inputType || "text";
+        }
         input.placeholder = field.placeholder || "";
-        input.value = node.config?.[field.key] ?? "";
+        if (field.storage === "xone-config") {
+          const config = getXoneConfigCache();
+          const storedValue = config ? config[field.key] : "";
+          input.value = storedValue || "";
+          if (!config) {
+            input.placeholder = "Carregando...";
+            input.disabled = true;
+            fetchXoneConfig()
+              .then(() => {
+                renderWorkflowInspectorPanel();
+                renderWorkflowModal();
+              })
+              .catch(() => {
+                input.disabled = false;
+              });
+          } else {
+            if (field.key === "clientSecret" && config.hasClientSecret) {
+              input.placeholder = "••••••••";
+            }
+          }
+        } else {
+          input.value = node.config?.[field.key] ?? "";
+        }
       }
 
-      if (field.type !== "conditions" && field.default !== undefined) {
+      if (
+        field.type !== "conditions" &&
+        field.default !== undefined &&
+        field.storage !== "xone-config"
+      ) {
         const currentConfig = node.config?.[field.key];
         const hasValue =
           currentConfig !== undefined &&
@@ -4161,6 +4480,26 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
       if (field.type !== "conditions") {
         input.addEventListener("change", (event) => {
+          if (field.storage === "xone-config") {
+            const value = event.target.value;
+            if (field.key === "clientSecret" && !value) {
+              return;
+            }
+            const payload = { [field.key]: value };
+            saveXoneConfig(payload)
+              .then(() => {
+                setWorkflowStatus("Configuracao xOne salva.", "success", {
+                  duration: 2500,
+                });
+              })
+              .catch((err) => {
+                setWorkflowStatus(
+                  err?.message || "Falha ao salvar configuracao xOne.",
+                  "error"
+                );
+              });
+            return;
+          }
           node.config[field.key] = event.target.value;
           saveWorkflowState();
           renderWorkflow();

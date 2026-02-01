@@ -8,6 +8,10 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
+const DEFAULT_XONE_TOKEN_URL =
+  "https://keycloak.xonecloud.com/realms/xone-cloud/protocol/openid-connect/token";
+const DEFAULT_XONE_API_BASE = "https://api.xonecloud.com/";
+
 const {
   DB_HOST = "db",
   DB_PORT = "5432",
@@ -20,8 +24,8 @@ const {
   AUTH_USER = "admin",
   AUTH_PASSWORD = "admin",
   AUTH_TOKEN_TTL_HOURS = "24",
-  XONE_TOKEN_URL = "https://keycloak.xonecloud.com/realms/xone-cloud/protocol/openid-connect/token",
-  XONE_API_BASE = "https://api.xonecloud.com/",
+  XONE_TOKEN_URL = DEFAULT_XONE_TOKEN_URL,
+  XONE_API_BASE = DEFAULT_XONE_API_BASE,
   XONE_CLIENT_ID,
   XONE_CLIENT_SECRET,
   XONE_SCOPE,
@@ -296,6 +300,16 @@ async function migrate() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS xone_config (
+      id INTEGER PRIMARY KEY,
+      token_url TEXT,
+      api_base TEXT,
+      client_id TEXT,
+      client_secret TEXT,
+      scope TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     ALTER TABLE api_tokens
       ADD COLUMN IF NOT EXISTS bearer_token TEXT;
 
@@ -379,6 +393,15 @@ function normalizeText(value) {
   if (value === undefined || value === null) return null;
   const trimmed = String(value).trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  if (!text) return defaultValue;
+  return ["1", "true", "yes", "y", "on"].includes(text);
 }
 
 function normalizeTimeForApi(value) {
@@ -706,6 +729,192 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 60000) {
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
+}
+
+class HttpError extends Error {
+  constructor(url, status, detail) {
+    super(`HTTP ${status} for ${url}: ${detail}`);
+    this.url = url;
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function requestJson(url, options = {}, timeoutMs = 20000) {
+  const response = await fetchWithTimeout(url, options, timeoutMs);
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    throw new HttpError(url, response.status, text || response.statusText);
+  }
+  if (data === null && text) {
+    throw new Error(`Resposta invalida (nao-JSON) de ${url}`);
+  }
+  return data;
+}
+
+function buildUrlWithQuery(url, queryParams) {
+  if (!queryParams || Object.keys(queryParams).length === 0) return url;
+  const parsed = new URL(url);
+  Object.entries(queryParams).forEach(([key, value]) => {
+    parsed.searchParams.set(key, value);
+  });
+  return parsed.toString();
+}
+
+function buildCandidateUrls(apiBase, endpoint, queryParams) {
+  if (!endpoint) return [];
+  if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+    return [buildUrlWithQuery(endpoint, queryParams)];
+  }
+  const base = apiBase.replace(/\/$/, "") + "/";
+  const cleanEndpoint = endpoint.replace(/^\//, "");
+  const urls = [buildUrlWithQuery(`${base}${cleanEndpoint}`, queryParams)];
+  if (!base.includes("/v1/") && !cleanEndpoint.startsWith("v1/")) {
+    urls.push(buildUrlWithQuery(`${base}v1/${cleanEndpoint}`, queryParams));
+  }
+  return urls;
+}
+
+function parseIsoDatetime(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function formatIsoDatetime(value) {
+  if (!value) return null;
+  return value.toISOString();
+}
+
+function normalizeRecords(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    for (const key of ["data", "items", "results", "usuarios", "records"]) {
+      if (Array.isArray(payload[key])) return payload[key];
+    }
+    return [payload];
+  }
+  return [payload];
+}
+
+async function fetchXoneToken(tokenUrl, clientId, clientSecret, scope, timeoutMs) {
+  const form = new URLSearchParams();
+  form.set("grant_type", "client_credentials");
+  form.set("client_id", clientId);
+  form.set("client_secret", clientSecret);
+  if (scope) {
+    form.set("scope", scope);
+  }
+  const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+  const payload = await requestJson(
+    tokenUrl,
+    { method: "POST", headers, body: form.toString() },
+    timeoutMs
+  );
+  const accessToken = payload?.access_token;
+  if (!accessToken) {
+    throw new Error("Token response missing access_token.");
+  }
+  return accessToken;
+}
+
+async function fetchXoneJson(apiBase, endpoint, token, queryParams, timeoutMs) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const candidates = buildCandidateUrls(apiBase, endpoint, queryParams);
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      return await requestJson(url, { headers }, timeoutMs);
+    } catch (err) {
+      if (err instanceof HttpError) {
+        lastError = err;
+        if (err.status === 404) {
+          continue;
+        }
+        throw err;
+      }
+      throw err;
+    }
+  }
+  if (lastError) throw lastError;
+  throw new Error("Nenhuma URL candidata disponivel.");
+}
+
+async function getXoneCheckpoint(endpoint) {
+  const result = await pool.query(
+    "SELECT last_value FROM xone_checkpoints WHERE endpoint = $1",
+    [endpoint]
+  );
+  if (result.rowCount === 0) return null;
+  return result.rows[0].last_value || null;
+}
+
+async function upsertXoneCheckpoint(endpoint, field, operator, lastValue) {
+  await pool.query(
+    `
+      INSERT INTO xone_checkpoints (endpoint, field, operator, last_value, updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (endpoint)
+      DO UPDATE SET field = EXCLUDED.field,
+                    operator = EXCLUDED.operator,
+                    last_value = EXCLUDED.last_value,
+                    updated_at = NOW();
+    `,
+    [endpoint, field, operator, lastValue]
+  );
+}
+
+async function getXoneConfigRow() {
+  const result = await pool.query("SELECT * FROM xone_config WHERE id = 1");
+  return result.rowCount ? result.rows[0] : null;
+}
+
+async function upsertXoneConfig(values) {
+  const {
+    tokenUrl,
+    apiBase,
+    clientId,
+    clientSecret,
+    scope,
+  } = values;
+
+  await pool.query(
+    `
+      INSERT INTO xone_config (id, token_url, api_base, client_id, client_secret, scope, updated_at)
+      VALUES (1, $1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET token_url = EXCLUDED.token_url,
+                    api_base = EXCLUDED.api_base,
+                    client_id = EXCLUDED.client_id,
+                    client_secret = EXCLUDED.client_secret,
+                    scope = EXCLUDED.scope,
+                    updated_at = NOW();
+    `,
+    [tokenUrl, apiBase, clientId, clientSecret, scope]
+  );
+}
+
+function resolveXoneConfig(row) {
+  return {
+    tokenUrl:
+      normalizeText(row?.token_url) ||
+      normalizeText(XONE_TOKEN_URL) ||
+      DEFAULT_XONE_TOKEN_URL,
+    apiBase:
+      normalizeText(row?.api_base) ||
+      normalizeText(XONE_API_BASE) ||
+      DEFAULT_XONE_API_BASE,
+    clientId: normalizeText(row?.client_id) || XONE_CLIENT_ID,
+    clientSecret: normalizeText(row?.client_secret) || XONE_CLIENT_SECRET,
+    scope: normalizeText(row?.scope) || XONE_SCOPE,
+  };
 }
 
 function buildApiPayload(schedule) {
@@ -2142,6 +2351,138 @@ app.delete("/api/workflows/:id", async (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+app.post("/api/xone-data", async (req, res) => {
+  const endpoint = normalizeText(req.body?.endpoint);
+  if (!endpoint) {
+    res.status(400).json({ error: "Endpoint obrigatorio" });
+    return;
+  }
+  const configRow = await getXoneConfigRow();
+  const resolved = resolveXoneConfig(configRow);
+  if (!resolved.tokenUrl) {
+    res.status(400).json({ error: "XONE_TOKEN_URL obrigatorio" });
+    return;
+  }
+  if (!resolved.apiBase) {
+    res.status(400).json({ error: "XONE_API_BASE obrigatorio" });
+    return;
+  }
+  if (!resolved.clientId || !resolved.clientSecret) {
+    res.status(400).json({ error: "XONE_CLIENT_ID e XONE_CLIENT_SECRET obrigatorios" });
+    return;
+  }
+
+  const checkpointEnabled = normalizeBoolean(req.body?.checkpointEnabled, true);
+  const checkpointField =
+    normalizeText(req.body?.checkpointField) || "created_date_local";
+  const operator =
+    (normalizeText(req.body?.checkpointOperator) || "gt").toLowerCase();
+  if (!["gt", "gte"].includes(operator)) {
+    res.status(400).json({ error: "Operador invalido (gt ou gte)" });
+    return;
+  }
+  const limit = normalizeNumber(req.body?.limit);
+  const timeoutSeconds = normalizeNumber(req.body?.timeoutSeconds) || 60;
+  const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
+
+  let queryParams = {};
+  if (checkpointEnabled) {
+    const lastValue = await getXoneCheckpoint(endpoint);
+    if (lastValue) {
+      queryParams = {
+        [checkpointField]: `${operator}.${lastValue}`,
+        order: `${checkpointField}.asc`,
+      };
+    }
+  }
+
+  try {
+    const token = await fetchXoneToken(
+      resolved.tokenUrl,
+      resolved.clientId,
+      resolved.clientSecret,
+      resolved.scope,
+      timeoutMs
+    );
+    const payload = await fetchXoneJson(
+      resolved.apiBase,
+      endpoint,
+      token,
+      queryParams,
+      timeoutMs
+    );
+
+    let records = normalizeRecords(payload);
+    if (Number.isFinite(limit)) {
+      records = records.slice(0, Math.max(0, limit));
+    }
+
+    if (checkpointEnabled && records.length > 0) {
+      let maxDate = null;
+      records.forEach((record) => {
+        if (record && typeof record === "object") {
+          const value = record[checkpointField];
+          const parsed = parseIsoDatetime(value);
+          if (parsed && (!maxDate || parsed > maxDate)) {
+            maxDate = parsed;
+          }
+        }
+      });
+      const formatted = maxDate ? formatIsoDatetime(maxDate) : null;
+      if (formatted) {
+        await upsertXoneCheckpoint(endpoint, checkpointField, operator, formatted);
+      }
+    }
+
+    res.json(records);
+  } catch (err) {
+    const message = err?.detail || err?.message || "Falha ao consultar xOne.";
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/xone-config", async (_req, res) => {
+  const row = await getXoneConfigRow();
+  const resolved = resolveXoneConfig(row);
+  res.json({
+    tokenUrl: resolved.tokenUrl,
+    apiBase: resolved.apiBase,
+    clientId: resolved.clientId || "",
+    scope: resolved.scope || "",
+    hasClientSecret: Boolean(resolved.clientSecret),
+  });
+});
+
+app.put("/api/xone-config", async (req, res) => {
+  const existing = await getXoneConfigRow();
+  const resolved = resolveXoneConfig(existing);
+
+  const tokenUrl = normalizeText(req.body?.tokenUrl) ?? resolved.tokenUrl;
+  const apiBase = normalizeText(req.body?.apiBase) ?? resolved.apiBase;
+  const clientId = normalizeText(req.body?.clientId) ?? resolved.clientId;
+  let clientSecret = resolved.clientSecret;
+  if (req.body?.clientSecret !== undefined) {
+    clientSecret = normalizeText(req.body.clientSecret);
+  }
+  const scope = normalizeText(req.body?.scope) ?? resolved.scope;
+
+  await upsertXoneConfig({
+    tokenUrl,
+    apiBase,
+    clientId,
+    clientSecret,
+    scope,
+  });
+
+  res.json({
+    tokenUrl,
+    apiBase,
+    clientId: clientId || "",
+    scope: scope || "",
+    hasClientSecret: Boolean(clientSecret),
+  });
 });
 
 app.get("/api/workflows/:id/schedule", async (req, res) => {

@@ -1390,14 +1390,16 @@ textarea::placeholder {
   color: #9ec5ff;
 }
 
-.brick-icon.is-xone-collaborators {
+.brick-icon.is-xone-collaborators,
+.brick-icon.is-xone-data {
   background: transparent;
   box-shadow: none;
   color: #ffffff;
 }
 
 .brick-icon.is-block img,
-.brick-icon.is-xone-collaborators img {
+.brick-icon.is-xone-collaborators img,
+.brick-icon.is-xone-data img {
   filter: brightness(0) invert(1);
 }
 
