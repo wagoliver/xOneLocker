@@ -462,7 +462,7 @@ const WORKFLOW_BRICKS = [
   },
   {
     type: "block",
-    title: "Bloqueio",
+    title: "xOne Locker",
     subtitle: "Gera lista de bloqueio a partir da lista dinamica",
     group: "Acao",
     summary: (node) => {
@@ -1198,6 +1198,12 @@ function getBrickIconSvg(type) {
 
 function getScheduleStatusLabel(schedule) {
   if (!schedule) return { label: "Sem execucao", tone: "neutral" };
+  if (schedule.has_schedule === false || !schedule.schedule_id) {
+    return { label: "Nao agendado", tone: "neutral" };
+  }
+  if (schedule.last_status === "partial") {
+    return { label: "Parcial", tone: "warning" };
+  }
   if (schedule.is_running) return { label: "Executando", tone: "running" };
   if (schedule.last_status === "success") {
     return { label: "Sucesso", tone: "ok" };
@@ -1218,46 +1224,64 @@ function renderWorkflowSchedules() {
     workflowSchedulesList.textContent = "Nenhum agendamento encontrado.";
     return;
   }
-  workflowSchedulesCache.forEach((schedule) => {
-    const card = document.createElement("div");
-    card.className = "schedule-card";
-    card.tabIndex = 0;
-    if (schedule.workflow_id) {
-      card.dataset.workflowId = schedule.workflow_id;
-    }
+  const withSchedule = workflowSchedulesCache.filter(
+    (item) => item.has_schedule || item.schedule_id
+  );
+  const withoutSchedule = workflowSchedulesCache.filter(
+    (item) => !item.has_schedule && !item.schedule_id
+  );
 
-    const grip = document.createElement("span");
-    grip.className = "schedule-grip";
+  const appendSection = (label, items) => {
+    if (!items.length) return;
+    const section = document.createElement("div");
+    section.className = "schedule-section";
+    section.textContent = label;
+    workflowSchedulesList.append(section);
+    items.forEach((schedule) => {
+      const card = document.createElement("div");
+      card.className = "schedule-card";
+      card.tabIndex = 0;
+      if (schedule.workflow_id) {
+        card.dataset.workflowId = schedule.workflow_id;
+      }
 
-    const icon = document.createElement("span");
-    icon.className = "schedule-icon";
-    icon.innerHTML = getBrickIconSvg("block");
+      const grip = document.createElement("span");
+      grip.className = "schedule-grip";
 
-    const info = document.createElement("div");
-    info.className = "schedule-info";
+      const icon = document.createElement("span");
+      icon.className = "schedule-icon";
+      icon.innerHTML = getBrickIconSvg("block");
 
-    const title = document.createElement("h4");
-    title.textContent = schedule.workflow_name || "Agendamento";
+      const info = document.createElement("div");
+      info.className = "schedule-info";
 
-    const subtitle = document.createElement("p");
-    subtitle.className = "muted";
-    subtitle.textContent = schedule.last_run_at
-      ? `Ultima execucao: ${formatWorkflowDate(schedule.last_run_at)}`
-      : "Ultima execucao: Nunca";
+      const title = document.createElement("h4");
+      title.textContent = schedule.workflow_name || "Agendamento";
 
-    info.append(title, subtitle);
+      const subtitle = document.createElement("p");
+      subtitle.className = "muted";
+      subtitle.textContent = schedule.last_run_at
+        ? `Ultima execucao: ${formatWorkflowDate(schedule.last_run_at)}`
+        : "Ultima execucao: Nunca";
 
-    const statusInfo = getScheduleStatusLabel(schedule);
+      info.append(title, subtitle);
+
+      const statusInfo = getScheduleStatusLabel(schedule);
     const status = document.createElement("span");
     status.className = "schedule-status";
     if (statusInfo.tone === "ok") status.classList.add("is-ok");
     if (statusInfo.tone === "error") status.classList.add("is-error");
     if (statusInfo.tone === "running") status.classList.add("is-running");
+    if (statusInfo.tone === "warning") status.classList.add("is-warning");
     status.textContent = statusInfo.label;
 
-    card.append(grip, icon, info, status);
-    workflowSchedulesList.append(card);
-  });
+      card.append(grip, icon, info, status);
+      workflowSchedulesList.append(card);
+    });
+  };
+
+  appendSection("Agendamentos automaticos", withSchedule);
+  appendSection("Fluxos sem agendamento", withoutSchedule);
 }
 
 async function fetchWorkflowSchedules() {
@@ -1295,6 +1319,9 @@ function setWorkflowPaletteTab(tab) {
   }
   if (workflowSchedulesList) {
     workflowSchedulesList.classList.toggle("is-active", tab === "schedules");
+  }
+  if (workflowSchedulesCount) {
+    workflowSchedulesCount.textContent = `${workflowSchedulesCache.length || 0}`;
   }
   const headerTitle = document.querySelector(".palette-header h3");
   if (headerTitle) {
@@ -4314,6 +4341,15 @@ function initializeWorkflow() {
       if (!card) return;
       const workflowId = Number(card.dataset.workflowId);
       if (!workflowId) return;
+      loadWorkflowFromServer(workflowId);
+    });
+    workflowSchedulesList.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const card = event.target.closest(".schedule-card");
+      if (!card) return;
+      const workflowId = Number(card.dataset.workflowId);
+      if (!workflowId) return;
+      event.preventDefault();
       loadWorkflowFromServer(workflowId);
     });
   }

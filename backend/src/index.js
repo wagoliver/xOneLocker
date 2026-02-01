@@ -1149,6 +1149,7 @@ async function executeWorkflowDefinition(definition) {
 
   const outputs = new Map();
   const results = [];
+  let hasWarning = false;
 
   for (const node of order) {
     if (node.type === "webhook") {
@@ -1298,8 +1299,12 @@ async function executeWorkflowDefinition(definition) {
         ok: failedCount === 0,
         total: targetList.length,
         failedCount,
+        successCount: targetList.length - failedCount,
       });
-      if (failedCount > 0) {
+      if (failedCount > 0 && targetList.length - failedCount > 0) {
+        hasWarning = true;
+      }
+      if (failedCount > 0 && targetList.length - failedCount === 0) {
         return { ok: false, error: "Falha ao executar bloqueio.", results };
       }
     } else if (node.type === "table") {
@@ -1311,7 +1316,7 @@ async function executeWorkflowDefinition(definition) {
     }
   }
 
-  return { ok: true, results };
+  return { ok: true, level: hasWarning ? "warning" : "success", results };
 }
 
 async function executeWorkflowById(workflowId, scheduleId = null) {
@@ -1343,6 +1348,8 @@ async function executeWorkflowById(workflowId, scheduleId = null) {
     if (!exec.ok) {
       status = "error";
       error = exec.error || "Falha na execucao do fluxo.";
+    } else if (exec.level === "warning") {
+      status = "partial";
     }
   } catch (err) {
     status = "error";
@@ -1361,7 +1368,7 @@ async function executeWorkflowById(workflowId, scheduleId = null) {
     [status, result, error, runId]
   );
 
-  return { ok: status === "success", status, result, error };
+  return { ok: status !== "error", status, result, error };
 }
 
 let workflowSchedulerTimer = null;
@@ -1405,8 +1412,8 @@ async function processWorkflowSchedules() {
       let error = null;
       try {
         const runResult = await executeWorkflowById(schedule.workflow_id, schedule.id);
+        status = runResult.status || (runResult.ok ? "success" : "error");
         if (!runResult.ok) {
-          status = "error";
           error = runResult.error || "Falha na execucao.";
         }
       } catch (err) {
@@ -2050,9 +2057,9 @@ app.get("/api/workflows", async (req, res) => {
 app.get("/api/workflows/schedules", async (_req, res) => {
   const result = await pool.query(
     `
-      SELECT s.id,
-             s.workflow_id,
+      SELECT w.id AS workflow_id,
              w.name AS workflow_name,
+             s.id AS schedule_id,
              s.cron,
              s.timezone,
              s.enabled,
@@ -2061,10 +2068,11 @@ app.get("/api/workflows/schedules", async (_req, res) => {
              s.last_run_at,
              s.last_status,
              s.last_error,
-             s.created_at,
-             s.updated_at
-      FROM locker_workflow_schedules s
-      JOIN locker_workflows w ON w.id = s.workflow_id
+             COALESCE(s.created_at, w.created_at) AS created_at,
+             COALESCE(s.updated_at, w.updated_at) AS updated_at,
+             (s.id IS NOT NULL) AS has_schedule
+      FROM locker_workflows w
+      LEFT JOIN locker_workflow_schedules s ON s.workflow_id = w.id
       ORDER BY w.name ASC;
     `
   );
