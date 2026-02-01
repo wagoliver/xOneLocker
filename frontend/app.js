@@ -93,6 +93,9 @@ const workflowCanvas = document.getElementById("workflow-canvas");
 const workflowNodesLayer = document.getElementById("workflow-nodes");
 const workflowEdgesLayer = document.getElementById("workflow-edges");
 const workflowInspectorBody = document.getElementById("workflow-inspector-body");
+const workflowPalettePanel = document.querySelector(".workflow-palette");
+const workflowPaletteToggle = document.getElementById("workflow-palette-toggle");
+const workflowInspectorPanel = document.querySelector(".workflow-inspector");
 const workflowMenu = document.getElementById("workflow-menu");
 const workflowEdgeMenu = document.getElementById("workflow-edge-menu");
 const workflowModal = document.getElementById("workflow-modal");
@@ -182,6 +185,7 @@ let workflowResponseNodeId = null;
 let workflowTableNodeId = null;
 const WORKFLOW_RESULT_LIMIT = 60000;
 const WORKFLOW_DEFAULT_OUTPUT_PATH = "data.item";
+const WEBHOOK_DEFAULT_TIMEOUT_SECONDS = 60;
 
 function showView(viewName) {
   Object.values(views).forEach((view) => {
@@ -311,7 +315,7 @@ const WORKFLOW_BRICKS = [
   {
     type: "filter",
     title: "Filtro",
-    subtitle: "Aplica regras no data.item",
+    subtitle: "Aplica regras na lista dinamica",
     group: "Transformacao",
     summary: (node) => {
       const count = Array.isArray(node.config?.conditions)
@@ -347,7 +351,7 @@ const WORKFLOW_BRICKS = [
   {
     type: "block",
     title: "Bloqueio",
-    subtitle: "Gera lista de bloqueio a partir do data.item",
+    subtitle: "Gera lista de bloqueio a partir da lista dinamica",
     group: "Acao",
     summary: (node) => {
       const actionLabel = Number(node.config?.actionType ?? 0) === 1
@@ -392,16 +396,17 @@ const WORKFLOW_BRICKS = [
         label: "Origem dos alvos",
         type: "select",
         options: [
-          { value: "data", label: "Data.item" },
+          { value: "data", label: "Lista dinamica" },
           { value: "manual", label: "Lista manual" },
         ],
         default: "data",
       },
       {
         key: "sourcePath",
-        label: "Caminho no data.item",
+        label: "Caminho na lista dinamica",
         type: "text",
         placeholder: "ex: data.items (opcional)",
+        suggestions: "sourcePath",
         dependsOn: { key: "sourceMode", values: ["data"] },
       },
       {
@@ -409,6 +414,7 @@ const WORKFLOW_BRICKS = [
         label: "Campo do item",
         type: "text",
         placeholder: "ex: username / hostname",
+        suggestions: "valuePath",
         dependsOn: { key: "sourceMode", values: ["data"] },
       },
       {
@@ -465,16 +471,55 @@ const WORKFLOW_BRICKS = [
         dependsOn: { key: "scheduleType", values: ["1"] },
       },
       {
+        key: "timeSource",
+        label: "Origem das horas",
+        type: "select",
+        options: [
+          { value: "manual", label: "Manual" },
+          { value: "dynamic", label: "Dinamica (campo do item)" },
+        ],
+        default: "manual",
+        dependsOn: { key: "scheduleType", values: ["1"] },
+      },
+      {
         key: "startTime",
         label: "Hora inicial",
         type: "time",
-        dependsOn: { key: "scheduleType", values: ["1"] },
+        dependsOn: [
+          { key: "scheduleType", values: ["1"] },
+          { key: "timeSource", values: ["manual"] },
+        ],
       },
       {
         key: "endTime",
         label: "Hora final",
         type: "time",
-        dependsOn: { key: "scheduleType", values: ["1"] },
+        dependsOn: [
+          { key: "scheduleType", values: ["1"] },
+          { key: "timeSource", values: ["manual"] },
+        ],
+      },
+      {
+        key: "startTimePath",
+        label: "Caminho da hora inicial",
+        type: "text",
+        placeholder: "ex: createdStartTime",
+        suggestions: "timePath",
+        dependsOn: [
+          { key: "scheduleType", values: ["1"] },
+          { key: "timeSource", values: ["dynamic"] },
+        ],
+      },
+      {
+        key: "endTimePath",
+        label: "Caminho da hora final",
+        type: "text",
+        placeholder: "ex: createdEndTime",
+        suggestions: "timePath",
+        dependsOn: [
+          { key: "scheduleType", values: ["1"] },
+          { key: "timeSource", values: ["dynamic"] },
+        ],
       },
       {
         key: "dedupe",
@@ -606,6 +651,13 @@ const WORKFLOW_BRICKS = [
         label: "Caminho da resposta",
         type: "text",
         placeholder: "ex: data.items (opcional)",
+      },
+      {
+        key: "timeoutSeconds",
+        label: "Timeout (segundos)",
+        type: "number",
+        placeholder: "60",
+        default: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS),
       },
     ],
   },
@@ -1234,19 +1286,29 @@ function getTargetValueFromEntry(entry, config) {
   );
 }
 
+function getTimeValueFromEntry(entry, path) {
+  const resolvedPath = String(path || "").trim();
+  if (!resolvedPath) return null;
+  return getValueByPath(entry, resolvedPath);
+}
+
 function buildBlockTargets(source, config) {
   const list = Array.isArray(source) ? source : [source];
   const targets = [];
   list.forEach((entry) => {
     const value = getTargetValueFromEntry(entry, config);
     const normalized = normalizeTargetValue(value);
-    if (normalized) targets.push(normalized);
+    if (normalized) targets.push({ target: normalized, entry });
   });
-  const unique =
-    String(config?.dedupe || "yes") === "no"
-      ? targets
-      : Array.from(new Set(targets));
-  return unique;
+  if (String(config?.dedupe || "yes") === "no") {
+    return targets;
+  }
+  const seen = new Set();
+  return targets.filter((item) => {
+    if (seen.has(item.target)) return false;
+    seen.add(item.target);
+    return true;
+  });
 }
 
 function parseManualTargets(value) {
@@ -1281,20 +1343,25 @@ function parseDaysOfWeek(value) {
   return Array.from(new Set(days));
 }
 
-function buildBlockSchedulePayload(config, targetValue) {
+function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
   const startDate = normalizeDateTime(config?.startDate);
   const endDate = normalizeDateTime(config?.endDate);
   const recurrenceType = normalizeNumber(config?.recurrenceType);
   const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
-  const startTime = normalizeTimeForApi(config?.startTime);
-  const endTime = normalizeTimeForApi(config?.endTime);
+  const resolvedStartTime =
+    options.startTime !== undefined ? options.startTime : config?.startTime;
+  const resolvedEndTime =
+    options.endTime !== undefined ? options.endTime : config?.endTime;
+  const startTime = normalizeTimeForApi(resolvedStartTime);
+  const endTime = normalizeTimeForApi(resolvedEndTime);
   const targetType = normalizeNumber(config?.targetType) ?? 0;
   const message =
     normalizeText(config?.message) ||
     (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
   const normalizedTarget = normalizeText(targetValue);
+  const skipTimeValidation = Boolean(options.skipTimeValidation);
 
   if (
     !message ||
@@ -1319,11 +1386,11 @@ function buildBlockSchedulePayload(config, targetValue) {
     return { error: "Selecione pelo menos um dia da semana." };
   }
 
-  if (scheduleType === 1 && (!startTime || !endTime)) {
+  if (scheduleType === 1 && !skipTimeValidation && (!startTime || !endTime)) {
     return { error: "Hora inicial e final sao obrigatorias." };
   }
 
-  if (scheduleType === 1) {
+  if (scheduleType === 1 && !skipTimeValidation) {
     const startSeconds = timeToSeconds(startTime);
     const endSeconds = timeToSeconds(endTime);
     if (
@@ -1994,6 +2061,77 @@ function getDefaultDataItem(payload) {
   return payload;
 }
 
+function collectContainerPaths(value, options = {}, prefix = "", depth = 0, paths = new Set()) {
+  const { maxDepth = 3 } = options;
+
+  if (value === undefined || value === null) return paths;
+  if (depth > maxDepth) return paths;
+
+  if (Array.isArray(value)) {
+    if (prefix) paths.add(prefix);
+    return paths;
+  }
+
+  if (typeof value !== "object") return paths;
+  if (prefix) paths.add(prefix);
+  if (depth >= maxDepth) return paths;
+
+  Object.entries(value).forEach(([key, val]) => {
+    if (val === undefined || val === null) return;
+    const nextKey = prefix ? `${prefix}.${key}` : key;
+    if (typeof val === "object") {
+      collectContainerPaths(val, options, nextKey, depth + 1, paths);
+    }
+  });
+
+  return paths;
+}
+
+function getBlockUpstreamItem(node) {
+  const source = getUpstreamNode(node);
+  if (!source) return undefined;
+  return getNodeOutputItem(source);
+}
+
+function getBlockSourcePathSuggestions(node) {
+  const item = getBlockUpstreamItem(node);
+  if (item === undefined) return [];
+  const paths = collectContainerPaths(item, { maxDepth: 3 });
+  return Array.from(paths).filter(Boolean).sort();
+}
+
+function getBlockValuePathSuggestions(node) {
+  const item = getBlockUpstreamItem(node);
+  if (item === undefined) return [];
+  const sourceItem = getBlockSourceItem(item, node.config || {});
+  const resolved = sourceItem !== undefined && sourceItem !== null ? sourceItem : item;
+  let sample = resolved;
+  if (Array.isArray(resolved)) {
+    sample =
+      resolved.find((entry) => entry && typeof entry === "object") ??
+      resolved.find((entry) => entry !== undefined && entry !== null);
+  }
+  if (!sample || typeof sample !== "object" || Array.isArray(sample)) return [];
+  const flat = flattenObject(sample, { maxDepth: 4, keepNull: true });
+  return Object.keys(flat).filter(Boolean).sort();
+}
+
+function getWorkflowFieldSuggestions(node, field) {
+  if (!node || node.type !== "block") return [];
+  const sourceMode = node.config?.sourceMode || "data";
+  if (sourceMode !== "data") return [];
+  if (field.suggestions === "sourcePath") {
+    return getBlockSourcePathSuggestions(node);
+  }
+  if (field.suggestions === "valuePath") {
+    return getBlockValuePathSuggestions(node);
+  }
+  if (field.suggestions === "timePath") {
+    return getBlockValuePathSuggestions(node);
+  }
+  return [];
+}
+
 function extractTableSource(payload) {
   return getDefaultDataItem(payload);
 }
@@ -2111,8 +2249,11 @@ async function executeWorkflowFromStart(startNode) {
         setWorkflowStatus("Parametros faltando no webhook.", "warning");
         break;
       }
-      if (!result.ok) {
-        setWorkflowStatus("Falha ao executar webhook.", "error");
+      if (!result.ok || result.timedOut) {
+        const errorMessage = result.timedOut
+          ? "Timeout no webhook."
+          : "Falha ao executar webhook.";
+        setWorkflowStatus(errorMessage, "error");
         setNodeExecutionStatus(startNode, "error");
         renderWorkflow();
         setWorkflowRunning(false);
@@ -2292,7 +2433,7 @@ function refreshTableFromUpstream(tableNode) {
   }
   const item = getNodeOutputItem(source);
   if (item === undefined) {
-    setWorkflowStatus("Erro ao ler data.item do bloco anterior.", "error");
+    setWorkflowStatus("Erro ao ler a lista dinamica do bloco anterior.", "error");
     setNodeExecutionStatus(tableNode, "error");
     return;
   }
@@ -2313,12 +2454,12 @@ function executeFilterNode(node) {
   }
   const item = getNodeOutputItem(source);
   if (item === undefined) {
-    setWorkflowStatus("Bloco anterior ainda nao possui data.item.", "warning");
+    setWorkflowStatus("Bloco anterior ainda nao possui lista dinamica.", "warning");
     setNodeExecutionStatus(node, "warning");
     return { ok: false, reason: "missing-item" };
   }
   if (!isFilterableItem(item)) {
-    setWorkflowStatus("Nao foi possivel interpretar o data.item anterior.", "error");
+    setWorkflowStatus("Nao foi possivel interpretar a lista dinamica anterior.", "error");
     setNodeExecutionStatus(node, "error");
     return { ok: false, reason: "invalid-item" };
   }
@@ -2349,10 +2490,14 @@ function executeFilterNode(node) {
 async function executeBlockNode(node) {
   const source = getUpstreamNode(node);
   const sourceMode = node.config?.sourceMode || "data";
+  const timeSource = node.config?.timeSource || "manual";
   let targets = [];
 
   if (sourceMode === "manual") {
-    targets = parseManualTargets(node.config?.manualTargets);
+    targets = parseManualTargets(node.config?.manualTargets).map((target) => ({
+      target,
+      entry: null,
+    }));
     if (!targets.length) {
       setWorkflowStatus("Informe pelo menos um alvo manual.", "warning");
       setNodeExecutionStatus(node, "warning");
@@ -2368,7 +2513,7 @@ async function executeBlockNode(node) {
     const item = getNodeOutputItem(source);
     if (item === undefined) {
       setWorkflowStatus(
-        "Nao foi possivel recuperar data.item do bloco anterior.",
+        "Nao foi possivel recuperar a lista dinamica do bloco anterior.",
         "warning"
       );
       setNodeExecutionStatus(node, "warning");
@@ -2378,7 +2523,7 @@ async function executeBlockNode(node) {
     const sourceItem = getBlockSourceItem(item, node.config || {});
     if (sourceItem === undefined || sourceItem === null) {
       setWorkflowStatus(
-        "Nao foi possivel recuperar data.items do bloco anterior.",
+        "Nao foi possivel recuperar os itens da lista dinamica do bloco anterior.",
         "warning"
       );
       setNodeExecutionStatus(node, "warning");
@@ -2400,7 +2545,7 @@ async function executeBlockNode(node) {
 
     if (!targets.length) {
       setWorkflowStatus(
-        "Nao foi possivel interpretar o data.items anterior.",
+        "Nao foi possivel interpretar os itens da lista dinamica anterior.",
         "error"
       );
       setNodeExecutionStatus(node, "error");
@@ -2408,19 +2553,38 @@ async function executeBlockNode(node) {
     }
   }
 
-  const validation = buildBlockSchedulePayload(node.config || {}, targets[0]);
+  const validationTarget = targets[0]?.target ?? targets[0];
+  const validation = buildBlockSchedulePayload(
+    node.config || {},
+    validationTarget,
+    { skipTimeValidation: timeSource === "dynamic" }
+  );
   if (validation.error) {
     setWorkflowStatus(validation.error, "warning");
     setNodeExecutionStatus(node, "warning");
     return { ok: false, level: "warning", reason: "invalid-config" };
   }
 
+  const targetList = targets.map((item) => item.target ?? item);
   const responses = [];
   let successCount = 0;
   let failedCount = 0;
   let lastStatus = null;
-  for (const target of targets) {
-    const { payload, error } = buildBlockSchedulePayload(node.config || {}, target);
+  for (const targetInfo of targets) {
+    const target = targetInfo.target ?? targetInfo;
+    const entry = targetInfo.entry;
+    const timeOverrides =
+      timeSource === "dynamic"
+        ? {
+            startTime: getTimeValueFromEntry(entry, node.config?.startTimePath),
+            endTime: getTimeValueFromEntry(entry, node.config?.endTimePath),
+          }
+        : {};
+    const { payload, error } = buildBlockSchedulePayload(
+      node.config || {},
+      target,
+      timeOverrides
+    );
     if (error || !payload) {
       failedCount += 1;
       responses.push({ target, ok: false, error: error || "Payload invalido." });
@@ -2483,7 +2647,7 @@ async function executeBlockNode(node) {
     targetType: Number(node.config?.targetType ?? 0),
     targets: responses.filter((item) => item.ok).map((item) => item.target),
     failedTargets: responses.filter((item) => !item.ok).map((item) => item.target),
-    total: targets.length,
+    total: targetList.length,
     successCount,
     failedCount,
   };
@@ -2492,10 +2656,10 @@ async function executeBlockNode(node) {
     kind: "block",
     ok: failedCount === 0 && successCount > 0,
     status: lastStatus,
-    total: targets.length,
+    total: targetList.length,
     successCount,
     failedCount,
-    targets,
+    targets: targetList,
     responses,
   };
   node.lastRunAt = new Date().toISOString();
@@ -2519,6 +2683,7 @@ async function executeBlockNode(node) {
 
 async function executeWebhookNode(node) {
   const start = performance.now();
+  const timeoutSeconds = normalizeTimeoutSeconds(node.config?.timeoutSeconds);
   const result = {
     ok: false,
     status: null,
@@ -2530,12 +2695,13 @@ async function executeWebhookNode(node) {
     bodyJson: null,
     warning: null,
     error: null,
+    timedOut: false,
   };
 
   try {
     const { url, options, warning } = buildWebhookRequest(node);
     result.warning = warning;
-    const response = await fetch(url, options);
+    const response = await fetchWithTimeout(url, options, timeoutSeconds);
     const elapsed = Math.round(performance.now() - start);
     const text = await response.text();
     let json = null;
@@ -2557,7 +2723,11 @@ async function executeWebhookNode(node) {
     result.bodyJson = json;
     setNodeExecutionStatus(node, response.ok ? "success" : "error");
   } catch (err) {
-    result.error = err?.message || "Falha ao executar webhook.";
+    const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
+    result.error = isTimeout
+      ? `Timeout excedido (${timeoutSeconds}s).`
+      : err?.message || "Falha ao executar webhook.";
+    result.timedOut = isTimeout;
     const message = String(result.error).toLowerCase();
     if (message.includes("obrigator")) {
       setNodeExecutionStatus(node, "warning");
@@ -2839,6 +3009,16 @@ function renderWorkflow() {
       const targetSuffix =
         targetCount > 1 ? ` (+${targetCount - 1})` : "";
 
+      const blockHeader = document.createElement("div");
+      blockHeader.className = "block-header";
+      const customName = String(node.config?.name || "").trim();
+      const headerTitle = customName || displayTitle || "Bloqueio";
+      const headerLabel = document.createElement("div");
+      headerLabel.className = "block-header-title";
+      headerLabel.textContent = headerTitle;
+      headerLabel.title = headerTitle;
+      blockHeader.append(headerLabel);
+
       const avatar = document.createElement("div");
       avatar.className = "block-avatar";
       const icon = document.createElement("img");
@@ -2852,12 +3032,21 @@ function renderWorkflow() {
       const title = document.createElement("div");
       title.className = "block-title";
       title.textContent = `${targetLabel}: ${primaryTarget}${targetSuffix}`;
+      title.title = title.textContent;
       const subtitle = document.createElement("div");
       subtitle.className = "block-sub";
-      const lockCount = actionType === 0 ? targetCount : 0;
-      const unlockCount = actionType === 1 ? targetCount : 0;
-      subtitle.textContent = `Locks: ${lockCount} / Unlocks: ${unlockCount}`;
+      const pluralTargetLabel =
+        targetLabel === "Usuario"
+          ? "Usuarios"
+          : targetLabel === "Hostname"
+            ? "Hostnames"
+            : `${targetLabel}s`;
+      subtitle.textContent = `${pluralTargetLabel}: ${targetCount}`;
       main.append(title, subtitle);
+
+      const body = document.createElement("div");
+      body.className = "block-body";
+      body.append(avatar, main);
 
       const meta = document.createElement("div");
       meta.className = "block-meta";
@@ -2881,8 +3070,6 @@ function renderWorkflow() {
       lastLine.textContent = `Ultima: ${lastRun}`;
       meta.append(nextLine, lastLine);
 
-      const status = document.createElement("div");
-      status.className = "block-status";
       const statusBadge = document.createElement("span");
       statusBadge.className = "badge na";
       const statusValue = node.lastResult?.status || "-";
@@ -2899,21 +3086,22 @@ function renderWorkflow() {
         statusBadge.className = "badge na";
         statusBadge.textContent = "Sem execucao";
       }
-      status.append(statusBadge);
 
       const isExpired =
         endDate && !Number.isNaN(new Date(endDate).getTime())
           ? new Date(endDate) < new Date()
           : false;
+      let expiredBadge = null;
       if (isExpired) {
-        const expiredBadge = document.createElement("span");
+        expiredBadge = document.createElement("span");
         expiredBadge.className = "badge state-expired";
         expiredBadge.textContent = "Expirado";
-        status.append(expiredBadge);
       }
 
       const actions = document.createElement("div");
       actions.className = "block-actions";
+      actions.append(statusBadge);
+      if (expiredBadge) actions.append(expiredBadge);
       const scheduleChip = document.createElement("div");
       scheduleChip.className = "block-chip";
       const scheduleCount = node.lastResult?.successCount ?? targetCount;
@@ -2932,7 +3120,20 @@ function renderWorkflow() {
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
-      actions.append(scheduleChip, kebab);
+      actions.append(scheduleChip);
+
+      const responseChip = document.createElement("button");
+      responseChip.type = "button";
+      responseChip.className = "block-chip block-chip-action";
+      responseChip.textContent = "Ver retorno";
+      responseChip.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+      responseChip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openWorkflowResponseModal(node.id);
+      });
+      actions.append(responseChip);
 
       const ports = document.createElement("div");
       ports.className = "node-ports";
@@ -2952,15 +3153,7 @@ function renderWorkflow() {
       }
       ports.append(portIn, portOut);
 
-      nodeEl.append(
-        removeButton,
-        avatar,
-        main,
-        meta,
-        status,
-        actions,
-        ports
-      );
+      nodeEl.append(removeButton, blockHeader, body, meta, actions, ports);
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -3071,7 +3264,7 @@ function renderWorkflow() {
     ports.append(portIn, portOut);
 
     if (tablePreview) {
-      nodeEl.append(header, subtitle, meta, tablePreview, ports);
+      nodeEl.append(header, subtitle, tablePreview, ports);
     } else {
       nodeEl.append(header, subtitle, meta, ports);
     }
@@ -3136,9 +3329,15 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
     def.fields.forEach((field) => {
       if (field.dependsOn) {
-        const currentValue = node.config?.[field.dependsOn.key];
-        const expectedValues = field.dependsOn.values || [field.dependsOn.value];
-        if (!expectedValues.includes(currentValue)) {
+        const deps = Array.isArray(field.dependsOn)
+          ? field.dependsOn
+          : [field.dependsOn];
+        const isVisible = deps.every((dep) => {
+          const currentValue = node.config?.[dep.key];
+          const expectedValues = dep.values || [dep.value];
+          return expectedValues.includes(currentValue);
+        });
+        if (!isVisible) {
           return;
         }
       }
@@ -3263,13 +3462,18 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         input.value = node.config?.[field.key] ?? "";
       }
 
-      if (
-        field.type !== "conditions" &&
-        field.default !== undefined &&
-        (input.value === "" || input.value === null)
-      ) {
-        input.value = field.default;
-        node.config[field.key] = field.default;
+      if (field.type !== "conditions" && field.default !== undefined) {
+        const currentConfig = node.config?.[field.key];
+        const hasValue =
+          currentConfig !== undefined &&
+          currentConfig !== null &&
+          currentConfig !== "";
+        if (!hasValue) {
+          node.config[field.key] = field.default;
+          if (input.value === "" || input.value === null) {
+            input.value = field.default;
+          }
+        }
       }
 
       if (field.type !== "conditions") {
@@ -3283,6 +3487,26 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
       }
 
       label.append(input);
+      if (field.type !== "conditions") {
+        const suggestions = getWorkflowFieldSuggestions(node, field);
+        if (
+          suggestions.length &&
+          input &&
+          input.tagName === "INPUT" &&
+          input.type === "text"
+        ) {
+          const listId = `datalist-${node.id}-${field.key}`;
+          const dataList = document.createElement("datalist");
+          dataList.id = listId;
+          suggestions.forEach((value) => {
+            const option = document.createElement("option");
+            option.value = value;
+            dataList.append(option);
+          });
+          input.setAttribute("list", listId);
+          label.append(dataList);
+        }
+      }
       form.append(label);
     });
 
@@ -3317,6 +3541,9 @@ function renderWorkflowInspectorPanel() {
   const node = workflowState.nodes.find(
     (item) => item.id === workflowState.selectedNodeId
   );
+  if (workflowInspectorPanel) {
+    workflowInspectorPanel.classList.toggle("is-collapsed", !node);
+  }
   renderWorkflowInspector(
     workflowInspectorBody,
     node,
@@ -3389,6 +3616,7 @@ function initializeWorkflow() {
       workflowIgnoreClick = false;
       return;
     }
+    if (event.target.closest(".workflow-chrome")) return;
     if (event.target.closest(".workflow-node")) return;
     if (event.target.closest(".workflow-edge")) return;
     workflowState.selectedNodeId = null;
@@ -3405,6 +3633,7 @@ function initializeWorkflow() {
   });
 
   workflowCanvas.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".workflow-chrome")) return;
     if (event.target.closest(".workflow-node")) return;
     if (event.target.closest(".workflow-edge")) return;
     if (workflowState.connectingFrom) return;
@@ -3569,6 +3798,13 @@ function initializeWorkflow() {
         return;
       }
       executeWorkflowFromStart(startNode);
+    });
+  }
+
+  if (workflowPaletteToggle && workflowPalettePanel) {
+    workflowPaletteToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      workflowPalettePanel.classList.toggle("is-collapsed");
     });
   }
 
@@ -6208,6 +6444,40 @@ function normalizeNumber(value) {
   const parsed = Number(value);
   if (Number.isNaN(parsed)) return null;
   return parsed;
+}
+
+function normalizeTimeoutSeconds(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return WEBHOOK_DEFAULT_TIMEOUT_SECONDS;
+  }
+  return Math.round(parsed);
+}
+
+async function fetchWithTimeout(url, options, timeoutSeconds) {
+  const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  let timeoutId = null;
+  const fetchPromise = fetch(url, {
+    ...options,
+    signal: controller ? controller.signal : undefined,
+  });
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      if (controller) controller.abort();
+      const error = new Error("Timeout");
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+
+  try {
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    return response;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 ruleForm.addEventListener("submit", async (event) => {

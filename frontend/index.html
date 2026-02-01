@@ -174,41 +174,53 @@
               <h1>Workflow</h1>
               <p class="muted">Arraste blocos para montar o fluxo de bloqueio.</p>
             </div>
-            <div class="toolbar-actions">
-              <button id="workflow-clear" class="ghost">Limpar</button>
-              <button id="workflow-load" class="ghost">Carregar</button>
-              <button id="workflow-save" class="ghost">Salvar</button>
-              <div class="zoom-controls">
-                <button id="workflow-zoom-out" class="ghost" type="button">-</button>
-                <button id="workflow-zoom-reset" class="ghost" type="button">100%</button>
-                <button id="workflow-zoom-in" class="ghost" type="button">+</button>
-              </div>
-              <button id="workflow-run" class="primary">Executar fluxo</button>
-            </div>
           </div>
           <div id="workflow-status" class="feedback"></div>
           <div class="workflow-layout">
-            <aside class="workflow-palette">
-              <div class="palette-header">
-                <h3>Blocos</h3>
-                <p class="muted">Arraste ou clique para adicionar.</p>
-              </div>
-              <div id="workflow-bricks" class="brick-list"></div>
-            </aside>
             <section id="workflow-canvas" class="workflow-canvas">
               <div id="workflow-empty" class="workflow-empty">
                 Arraste um bloco para iniciar o fluxo.
               </div>
               <svg id="workflow-edges" class="workflow-edges"></svg>
               <div id="workflow-nodes" class="workflow-nodes"></div>
-            </section>
-            <aside class="workflow-inspector">
-              <div class="inspector-header">
-                <h3>Propriedades</h3>
-                <p class="muted">Selecione um bloco para configurar.</p>
+              <div class="workflow-chrome">
+                <div class="workflow-controls">
+                  <button id="workflow-clear" class="ghost">Limpar</button>
+                  <button id="workflow-load" class="ghost">Carregar</button>
+                  <button id="workflow-save" class="ghost">Salvar</button>
+                  <div class="zoom-controls">
+                    <button id="workflow-zoom-out" class="ghost" type="button">-</button>
+                    <button id="workflow-zoom-reset" class="ghost" type="button">100%</button>
+                    <button id="workflow-zoom-in" class="ghost" type="button">+</button>
+                  </div>
+                  <button id="workflow-run" class="primary">Executar fluxo</button>
+                </div>
+                <aside class="workflow-palette is-collapsed">
+                  <div class="palette-header">
+                    <div class="palette-heading">
+                      <h3>Blocos</h3>
+                      <button
+                        id="workflow-palette-toggle"
+                        class="ghost palette-toggle"
+                        type="button"
+                        title="Expandir/colapsar blocos"
+                      >
+                        ↔
+                      </button>
+                    </div>
+                    <p class="muted">Arraste ou clique para adicionar.</p>
+                  </div>
+                  <div id="workflow-bricks" class="brick-list"></div>
+                </aside>
+                <aside class="workflow-inspector is-collapsed">
+                  <div class="inspector-header">
+                    <h3>Propriedades</h3>
+                    <p class="muted">Selecione um bloco para configurar.</p>
+                  </div>
+                  <div id="workflow-inspector-body" class="inspector-body"></div>
+                </aside>
               </div>
-              <div id="workflow-inspector-body" class="inspector-body"></div>
-            </aside>
+            </section>
           </div>
         </section>
 
