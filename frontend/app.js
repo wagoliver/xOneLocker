@@ -201,6 +201,8 @@ let workflowMenuEdge = null;
 let workflowScheduleMenuWorkflowId = null;
 let xoneConfigCache = null;
 let xoneConfigLoading = null;
+const xoneCheckpointCache = new Map();
+const xoneCheckpointLoading = new Map();
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowTableNodeId = null;
@@ -408,6 +410,39 @@ async function saveXoneConfig(patch) {
   }
   setXoneConfigCache(data);
   return data;
+}
+
+function getTodayIsoDate() {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now.toISOString();
+}
+
+async function fetchXoneCheckpoint(endpoint) {
+  const key = String(endpoint || "").trim();
+  if (!key) return null;
+  if (xoneCheckpointCache.has(key)) return xoneCheckpointCache.get(key);
+  if (xoneCheckpointLoading.has(key)) {
+    return xoneCheckpointLoading.get(key);
+  }
+  const task = (async () => {
+    try {
+      const response = await apiFetch(
+        `/api/xone-checkpoint?endpoint=${encodeURIComponent(key)}`
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Falha ao carregar checkpoint.");
+      }
+      const data = await response.json();
+      xoneCheckpointCache.set(key, data);
+      return data;
+    } finally {
+      xoneCheckpointLoading.delete(key);
+    }
+  })();
+  xoneCheckpointLoading.set(key, task);
+  return task;
 }
 
 function updateWorkflowScheduleVisibility() {
@@ -841,6 +876,14 @@ const WORKFLOW_BRICKS = [
         dependsOn: { key: "checkpointEnabled", values: ["yes"] },
       },
       {
+        key: "checkpointValue",
+        label: "Checkpoint inicial",
+        type: "text",
+        placeholder: "Ex: 2026-02-01T00:00:00Z",
+        default: "",
+        dependsOn: { key: "checkpointEnabled", values: ["yes"] },
+      },
+      {
         key: "limit",
         label: "Limite (opcional)",
         type: "number",
@@ -1168,11 +1211,36 @@ function loadWorkflowState() {
 function saveWorkflowState() {
   if (!workflowState.loaded) return;
   const payload = {
-    nodes: workflowState.nodes,
+    nodes: workflowState.nodes.map((node) => {
+      const {
+        output,
+        outputUpdatedAt,
+        execStatus,
+        execStatusAt,
+        tableData,
+        lastResult,
+        lastRunAt,
+        ...rest
+      } = node;
+      return rest;
+    }),
     edges: workflowState.edges,
     selectedNodeId: workflowState.selectedNodeId,
   };
-  window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(payload));
+  try {
+    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    try {
+      window.localStorage.removeItem(WORKFLOW_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    setWorkflowStatus(
+      "Nao foi possivel salvar o rascunho (dados grandes). Salve o fluxo.",
+      "warning",
+      { duration: 5000 }
+    );
+  }
 }
 
 function serializeWorkflowDefinition() {
@@ -4457,6 +4525,29 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           }
         } else {
           input.value = node.config?.[field.key] ?? "";
+          if (node.type === "xone-data" && field.key === "checkpointValue") {
+            const endpointValue = String(node.config?.endpoint || "").trim();
+            const fallback = getTodayIsoDate();
+            if (!input.value) {
+              input.value = node.config?.checkpointValue || fallback;
+              node.config.checkpointValue = input.value;
+            }
+            input.placeholder = fallback;
+            if (endpointValue) {
+              fetchXoneCheckpoint(endpointValue)
+                .then((checkpoint) => {
+                  if (!checkpoint?.lastValue) return;
+                  if (input.dataset.touched === "1") return;
+                  input.value = checkpoint.lastValue;
+                  node.config.checkpointValue = checkpoint.lastValue;
+                  saveWorkflowState();
+                  renderWorkflow();
+                })
+                .catch(() => {
+                  // ignore
+                });
+            }
+          }
         }
       }
 
@@ -4501,6 +4592,12 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
             return;
           }
           node.config[field.key] = event.target.value;
+          if (node.type === "xone-data" && field.key === "endpoint") {
+            xoneCheckpointCache.delete(event.target.value.trim());
+          }
+          if (node.type === "xone-data" && field.key === "checkpointValue") {
+            input.dataset.touched = "1";
+          }
           saveWorkflowState();
           renderWorkflow();
           renderWorkflowInspectorPanel();

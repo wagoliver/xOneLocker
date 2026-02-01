@@ -856,6 +856,19 @@ async function getXoneCheckpoint(endpoint) {
   return result.rows[0].last_value || null;
 }
 
+async function getXoneCheckpointDetails(endpoint) {
+  const result = await pool.query(
+    `
+      SELECT endpoint, field, operator, last_value, updated_at
+      FROM xone_checkpoints
+      WHERE endpoint = $1;
+    `,
+    [endpoint]
+  );
+  if (result.rowCount === 0) return null;
+  return result.rows[0];
+}
+
 async function upsertXoneCheckpoint(endpoint, field, operator, lastValue) {
   await pool.query(
     `
@@ -2390,9 +2403,11 @@ app.post("/api/xone-data", async (req, res) => {
   let queryParams = {};
   if (checkpointEnabled) {
     const lastValue = await getXoneCheckpoint(endpoint);
-    if (lastValue) {
+    const fallbackValue = normalizeText(req.body?.checkpointValue);
+    const resolvedValue = lastValue || fallbackValue || null;
+    if (resolvedValue) {
       queryParams = {
-        [checkpointField]: `${operator}.${lastValue}`,
+        [checkpointField]: `${operator}.${resolvedValue}`,
         order: `${checkpointField}.asc`,
       };
     }
@@ -2482,6 +2497,26 @@ app.put("/api/xone-config", async (req, res) => {
     clientId: clientId || "",
     scope: scope || "",
     hasClientSecret: Boolean(clientSecret),
+  });
+});
+
+app.get("/api/xone-checkpoint", async (req, res) => {
+  const endpoint = normalizeText(req.query?.endpoint);
+  if (!endpoint) {
+    res.status(400).json({ error: "Endpoint obrigatorio" });
+    return;
+  }
+  const row = await getXoneCheckpointDetails(endpoint);
+  if (!row) {
+    res.json({ endpoint, lastValue: null, field: null, operator: null });
+    return;
+  }
+  res.json({
+    endpoint: row.endpoint,
+    lastValue: row.last_value,
+    field: row.field,
+    operator: row.operator,
+    updatedAt: row.updated_at,
   });
 });
 
