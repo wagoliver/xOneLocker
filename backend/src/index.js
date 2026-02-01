@@ -2047,6 +2047,30 @@ app.get("/api/workflows", async (req, res) => {
   res.json(result.rows);
 });
 
+app.get("/api/workflows/schedules", async (_req, res) => {
+  const result = await pool.query(
+    `
+      SELECT s.id,
+             s.workflow_id,
+             w.name AS workflow_name,
+             s.cron,
+             s.timezone,
+             s.enabled,
+             s.is_running,
+             s.next_run_at,
+             s.last_run_at,
+             s.last_status,
+             s.last_error,
+             s.created_at,
+             s.updated_at
+      FROM locker_workflow_schedules s
+      JOIN locker_workflows w ON w.id = s.workflow_id
+      ORDER BY w.name ASC;
+    `
+  );
+  res.json(result.rows);
+});
+
 app.get("/api/workflows/:id", async (req, res) => {
   const id = normalizeNumber(req.params?.id);
   if (!id) {

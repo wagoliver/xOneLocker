@@ -930,6 +930,11 @@ textarea::placeholder {
 .workflow-palette {
   left: 16px;
   width: min(280px, 35vw);
+  background: radial-gradient(circle at top, rgba(255, 255, 255, 0.08), rgba(10, 10, 10, 0.9) 55%);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), var(--shadow);
+  border-radius: 26px;
+  padding: 18px;
 }
 
 .workflow-inspector {
@@ -944,11 +949,18 @@ textarea::placeholder {
   gap: 8px;
 }
 
+.palette-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .palette-toggle {
   border-radius: 999px;
   padding: 4px 8px;
   font-size: 12px;
   line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .workflow-palette.is-collapsed {
@@ -1019,50 +1031,89 @@ textarea::placeholder {
 .palette-header h3,
 .inspector-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 24px;
   font-family: "Cal Sans", "Instrument Sans", "Manrope", sans-serif;
 }
 
 .palette-header .muted,
 .inspector-header .muted {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .brick-list {
   display: grid;
-  gap: 12px;
+  gap: 18px;
 }
 
 .brick-list.is-hidden {
   display: none;
 }
 
+.brick-group {
+  display: grid;
+  gap: 12px;
+}
+
+.brick-group + .brick-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+.brick-group-title {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0 6px;
+}
+
 .palette-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  margin-top: 10px;
+}
+
+.palette-tabs.pill-tabs {
+  background: rgba(0, 0, 0, 0.45);
+  padding: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .palette-tab {
-  border: 1px solid var(--line);
-  background: var(--accent);
-  color: var(--muted);
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
   font-weight: 600;
   font-size: 12px;
-  padding: 8px 10px;
+  padding: 6px 12px;
   border-radius: 999px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .palette-tab.is-active {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border-color: var(--primary);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.pill-count {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .schedule-list {
   display: none;
-  gap: 12px;
+  gap: 14px;
 }
 
 .schedule-list.is-active {
@@ -1070,21 +1121,72 @@ textarea::placeholder {
 }
 
 .schedule-card {
-  border: 1px solid var(--line);
-  background: var(--accent);
-  padding: 12px;
-  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  padding: 14px;
+  border-radius: 18px;
   display: grid;
-  gap: 6px;
+  grid-template-columns: 14px 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+}
+
+.schedule-card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.35);
 }
 
 .schedule-card h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .schedule-card .muted {
   font-size: 12px;
+}
+
+.schedule-grip {
+  width: 12px;
+  height: 26px;
+  position: relative;
+  opacity: 0.7;
+}
+
+.schedule-grip::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 8px 0 rgba(255, 255, 255, 0.5),
+    0 16px 0 rgba(255, 255, 255, 0.5);
+}
+
+.schedule-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f28b82;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.schedule-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.schedule-info {
+  display: grid;
+  gap: 4px;
 }
 
 .schedule-status {
@@ -1116,16 +1218,19 @@ textarea::placeholder {
 }
 
 .brick-tile {
-  border: 1px solid var(--line);
-  background: var(--accent);
-  padding: 12px;
-  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  padding: 12px 14px;
+  border-radius: 16px;
   cursor: grab;
   color: var(--ink);
   text-align: left;
   display: grid;
-  gap: 6px;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  grid-template-columns: 12px 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .brick-tile:active {
@@ -1135,24 +1240,83 @@ textarea::placeholder {
 .brick-tile:hover {
   border-color: rgba(255, 255, 255, 0.2);
   transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
 }
 
-.brick-meta {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
+.brick-grip {
+  width: 12px;
+  height: 26px;
+  position: relative;
+  opacity: 0.7;
+}
+
+.brick-grip::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 8px 0 rgba(255, 255, 255, 0.5),
+    0 16px 0 rgba(255, 255, 255, 0.5);
+}
+
+.brick-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f5f5f5;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.brick-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.brick-icon.is-start {
+  color: #ffba7a;
+}
+
+.brick-icon.is-filter {
+  color: #8ee3d5;
+}
+
+.brick-icon.is-block {
+  color: #f28b82;
+}
+
+.brick-icon.is-webhook {
+  color: #9ec5ff;
+}
+
+.brick-icon.is-table {
+  color: #a7f3d0;
+}
+
+.brick-info {
+  display: grid;
+  gap: 2px;
 }
 
 .brick-title {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .brick-subtitle {
   font-size: 12px;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.55);
   line-height: 1.4;
+  max-height: 2.8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workflow-canvas {

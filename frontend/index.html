@@ -6,7 +6,7 @@
     <title>Locker - Regras</title>
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Instrument+Sans:wght@400;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2+ -family=Manrope:wght@400;600;700&family=Instrument+Sans:wght@400;600;700&display=swap"
     />
     <link
       rel="stylesheet"
@@ -205,17 +205,17 @@
                         type="button"
                         title="Expandir/colapsar blocos"
                       >
-                        ↔
+                        + -
                       </button>
                     </div>
                     <p class="muted">Arraste ou clique para adicionar.</p>
                   </div>
-                  <div class="palette-tabs">
+                  <div class="palette-tabs pill-tabs">
                     <button class="palette-tab is-active" data-tab="bricks" type="button">
-                      Blocos
+                      Blocos <span class="pill-count" id="workflow-bricks-count"></span>
                     </button>
                     <button class="palette-tab" data-tab="schedules" type="button">
-                      Agendamentos
+                      Agendamentos <span class="pill-count" id="workflow-schedules-count"></span>
                     </button>
                   </div>
                   <div id="workflow-bricks" class="brick-list"></div>
@@ -656,3 +656,5 @@
     <script src="app.js"></script>
   </body>
 </html>
+
+

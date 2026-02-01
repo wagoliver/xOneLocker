@@ -91,6 +91,10 @@ const goLoginButton = document.getElementById("go-login");
 const workflowPalette = document.getElementById("workflow-bricks");
 const workflowSchedulesList = document.getElementById("workflow-schedules");
 const workflowPaletteTabs = document.querySelectorAll(".palette-tab");
+const workflowBricksCount = document.getElementById("workflow-bricks-count");
+const workflowSchedulesCount = document.getElementById(
+  "workflow-schedules-count"
+);
 const workflowCanvas = document.getElementById("workflow-canvas");
 const workflowNodesLayer = document.getElementById("workflow-nodes");
 const workflowEdgesLayer = document.getElementById("workflow-edges");
@@ -1051,8 +1055,14 @@ async function saveWorkflowToServer(name) {
         cron: schedulePayload.cron,
         timezone: schedulePayload.timezone,
       });
+      if (workflowPaletteTab === "schedules") {
+        fetchWorkflowSchedules();
+      }
     } else if (!schedulePayload) {
       saveWorkflowScheduleDraft(null);
+      if (workflowPaletteTab === "schedules") {
+        fetchWorkflowSchedules();
+      }
     }
 
     window.localStorage.setItem(WORKFLOW_NAME_KEY, trimmed);
@@ -1138,6 +1148,167 @@ function formatWorkflowDate(value) {
     return date.toLocaleString("pt-BR");
   } catch {
     return String(value);
+  }
+}
+
+function getBrickIconSvg(type) {
+  switch (type) {
+    case "start":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 5l12 7-12 7z" fill="currentColor"></path>
+        </svg>
+      `;
+    case "filter":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 5h18l-7 8v5l-4 2v-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+        </svg>
+      `;
+    case "block":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"></circle>
+          <path d="M8 16l8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+      `;
+    case "webhook":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 7h4l2 3-2 3H7l-2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M17 7h-4l-2-3 2-3h4l2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M17 17h-4l-2 3 2 3h4l2-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      `;
+    case "table":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"></rect>
+          <path d="M4 10h16M4 14h16M10 5v14" stroke="currentColor" stroke-width="2"></path>
+        </svg>
+      `;
+    default:
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" fill="currentColor"></circle>
+        </svg>
+      `;
+  }
+}
+
+function getScheduleStatusLabel(schedule) {
+  if (!schedule) return { label: "Sem execucao", tone: "neutral" };
+  if (schedule.is_running) return { label: "Executando", tone: "running" };
+  if (schedule.last_status === "success") {
+    return { label: "Sucesso", tone: "ok" };
+  }
+  if (schedule.last_status === "error") {
+    return { label: "Erro", tone: "error" };
+  }
+  if (schedule.enabled === false) {
+    return { label: "Desativado", tone: "neutral" };
+  }
+  return { label: "Sem execucao", tone: "neutral" };
+}
+
+function renderWorkflowSchedules() {
+  if (!workflowSchedulesList) return;
+  workflowSchedulesList.innerHTML = "";
+  if (!workflowSchedulesCache.length) {
+    workflowSchedulesList.textContent = "Nenhum agendamento encontrado.";
+    return;
+  }
+  workflowSchedulesCache.forEach((schedule) => {
+    const card = document.createElement("div");
+    card.className = "schedule-card";
+    card.tabIndex = 0;
+    if (schedule.workflow_id) {
+      card.dataset.workflowId = schedule.workflow_id;
+    }
+
+    const grip = document.createElement("span");
+    grip.className = "schedule-grip";
+
+    const icon = document.createElement("span");
+    icon.className = "schedule-icon";
+    icon.innerHTML = getBrickIconSvg("block");
+
+    const info = document.createElement("div");
+    info.className = "schedule-info";
+
+    const title = document.createElement("h4");
+    title.textContent = schedule.workflow_name || "Agendamento";
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "muted";
+    subtitle.textContent = schedule.last_run_at
+      ? `Ultima execucao: ${formatWorkflowDate(schedule.last_run_at)}`
+      : "Ultima execucao: Nunca";
+
+    info.append(title, subtitle);
+
+    const statusInfo = getScheduleStatusLabel(schedule);
+    const status = document.createElement("span");
+    status.className = "schedule-status";
+    if (statusInfo.tone === "ok") status.classList.add("is-ok");
+    if (statusInfo.tone === "error") status.classList.add("is-error");
+    if (statusInfo.tone === "running") status.classList.add("is-running");
+    status.textContent = statusInfo.label;
+
+    card.append(grip, icon, info, status);
+    workflowSchedulesList.append(card);
+  });
+}
+
+async function fetchWorkflowSchedules() {
+  if (!workflowSchedulesList) return;
+  workflowSchedulesList.textContent = "Carregando agendamentos...";
+  try {
+    const response = await apiFetch("/api/workflows/schedules");
+    if (!response.ok) {
+      const errorText = await response.text();
+      workflowSchedulesList.textContent =
+        errorText || "Falha ao carregar agendamentos.";
+      return;
+    }
+    const data = await response.json();
+    workflowSchedulesCache = Array.isArray(data) ? data : [];
+    renderWorkflowSchedules();
+    if (workflowSchedulesCount) {
+      workflowSchedulesCount.textContent = `${workflowSchedulesCache.length}`;
+    }
+  } catch (err) {
+    workflowSchedulesList.textContent =
+      err?.message || "Falha ao carregar agendamentos.";
+  }
+}
+
+function setWorkflowPaletteTab(tab) {
+  workflowPaletteTab = tab;
+  if (workflowPaletteTabs) {
+    workflowPaletteTabs.forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.tab === tab);
+    });
+  }
+  if (workflowPalette) {
+    workflowPalette.classList.toggle("is-hidden", tab !== "bricks");
+  }
+  if (workflowSchedulesList) {
+    workflowSchedulesList.classList.toggle("is-active", tab === "schedules");
+  }
+  const headerTitle = document.querySelector(".palette-header h3");
+  if (headerTitle) {
+    headerTitle.textContent = tab === "schedules" ? "Agendamentos" : "Blocos";
+  }
+  const headerDesc = document.querySelector(".palette-header .muted");
+  if (headerDesc) {
+    headerDesc.textContent =
+      tab === "schedules"
+        ? "Resumo das execucoes por fluxo."
+        : "Arraste ou clique para adicionar.";
+  }
+  if (tab === "schedules") {
+    fetchWorkflowSchedules();
   }
 }
 
@@ -3092,28 +3263,58 @@ function bindWorkflowNodeDrag(nodeEl, node) {
 function renderWorkflowPalette() {
   if (!workflowPalette) return;
   workflowPalette.innerHTML = "";
+  const groups = new Map();
   WORKFLOW_BRICKS.forEach((brick) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "brick-tile";
-    button.setAttribute("draggable", "true");
-    button.dataset.brick = brick.type;
-
-    const meta = document.createElement("div");
-    meta.className = "brick-meta";
-    meta.textContent = brick.group || "Bloco";
-
-    const title = document.createElement("div");
-    title.className = "brick-title";
-    title.textContent = brick.title;
-
-    const subtitle = document.createElement("div");
-    subtitle.className = "brick-subtitle";
-    subtitle.textContent = brick.subtitle;
-
-    button.append(meta, title, subtitle);
-    workflowPalette.append(button);
+    const group = brick.group || "Bloco";
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(brick);
   });
+
+  groups.forEach((items, group) => {
+    const section = document.createElement("div");
+    section.className = "brick-group";
+
+    const header = document.createElement("div");
+    header.className = "brick-group-title";
+    header.textContent = group.toUpperCase();
+    section.append(header);
+
+    items.forEach((brick) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "brick-tile";
+      button.setAttribute("draggable", "true");
+      button.dataset.brick = brick.type;
+
+      const grip = document.createElement("span");
+      grip.className = "brick-grip";
+
+      const icon = document.createElement("span");
+      icon.className = `brick-icon is-${brick.type}`;
+      icon.innerHTML = getBrickIconSvg(brick.type);
+
+      const info = document.createElement("span");
+      info.className = "brick-info";
+
+      const title = document.createElement("span");
+      title.className = "brick-title";
+      title.textContent = brick.title;
+
+      const subtitle = document.createElement("span");
+      subtitle.className = "brick-subtitle";
+      subtitle.textContent = brick.subtitle;
+
+      info.append(title, subtitle);
+      button.append(grip, icon, info);
+      section.append(button);
+    });
+
+    workflowPalette.append(section);
+  });
+
+  if (workflowBricksCount) {
+    workflowBricksCount.textContent = `${WORKFLOW_BRICKS.length}`;
+  }
 }
 
 function renderWorkflow() {
@@ -3860,6 +4061,7 @@ function renderWorkflowModal() {
 function initializeWorkflow() {
   if (!workflowPalette || !workflowCanvas) return;
   renderWorkflowPalette();
+  setWorkflowPaletteTab("bricks");
   loadWorkflowState();
   renderWorkflow();
   renderWorkflowInspectorPanel();
@@ -4097,6 +4299,22 @@ function initializeWorkflow() {
     workflowPaletteToggle.addEventListener("click", (event) => {
       event.stopPropagation();
       workflowPalettePanel.classList.toggle("is-collapsed");
+    });
+  }
+  if (workflowPaletteTabs && workflowPaletteTabs.length) {
+    workflowPaletteTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        setWorkflowPaletteTab(tab.dataset.tab || "bricks");
+      });
+    });
+  }
+  if (workflowSchedulesList) {
+    workflowSchedulesList.addEventListener("click", (event) => {
+      const card = event.target.closest(".schedule-card");
+      if (!card) return;
+      const workflowId = Number(card.dataset.workflowId);
+      if (!workflowId) return;
+      loadWorkflowFromServer(workflowId);
     });
   }
 
