@@ -210,7 +210,16 @@
                     </div>
                     <p class="muted">Arraste ou clique para adicionar.</p>
                   </div>
+                  <div class="palette-tabs">
+                    <button class="palette-tab is-active" data-tab="bricks" type="button">
+                      Blocos
+                    </button>
+                    <button class="palette-tab" data-tab="schedules" type="button">
+                      Agendamentos
+                    </button>
+                  </div>
                   <div id="workflow-bricks" class="brick-list"></div>
+                  <div id="workflow-schedules" class="schedule-list"></div>
                 </aside>
                 <aside class="workflow-inspector is-collapsed">
                   <div class="inspector-header">
@@ -531,6 +540,9 @@
       <button type="button" class="context-item" data-action="view-table">
         Ver tabela
       </button>
+      <button type="button" class="context-item" data-action="remove-links">
+        Remover ligacoes
+      </button>
       <button type="button" class="context-item is-danger" data-action="delete">
         Excluir
       </button>
@@ -589,6 +601,34 @@
               autocomplete="off"
             />
           </label>
+        </div>
+        <div class="workflow-save-schedule">
+          <label class="workflow-schedule-toggle">
+            <input type="checkbox" id="workflow-save-schedule-toggle" />
+            Agendar execucao automatica
+          </label>
+          <div class="form-grid workflow-save-schedule-fields">
+            <label>
+              Expressao cron
+              <input
+                id="workflow-save-cron"
+                type="text"
+                placeholder="0 9 * * *"
+                autocomplete="off"
+              />
+              <div class="field-hint">Ex: 0 9 * * * (todo dia 09:00)</div>
+            </label>
+            <label>
+              Timezone
+              <input
+                id="workflow-save-timezone"
+                type="text"
+                placeholder="America/Sao_Paulo"
+                autocomplete="off"
+              />
+              <div class="field-hint">Use o ID da zona (ex: UTC).</div>
+            </label>
+          </div>
         </div>
         <div id="workflow-save-feedback" class="feedback"></div>
         <div class="actions confirm-actions">

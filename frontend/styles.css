@@ -552,6 +552,33 @@ textarea::placeholder {
   display: none;
 }
 
+#workflow-save-modal .workflow-save-schedule {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--accent);
+  display: grid;
+  gap: 12px;
+}
+
+#workflow-save-modal .workflow-schedule-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+#workflow-save-modal .workflow-save-schedule-fields {
+  display: none;
+}
+
+#workflow-save-modal .workflow-save-schedule.is-active .workflow-save-schedule-fields {
+  display: grid;
+}
+
 #schedule-start-time-field,
 #schedule-end-time-field {
   display: none;
@@ -931,6 +958,8 @@ textarea::placeholder {
 }
 
 .workflow-palette.is-collapsed .brick-list,
+.workflow-palette.is-collapsed .schedule-list,
+.workflow-palette.is-collapsed .palette-tabs,
 .workflow-palette.is-collapsed .palette-header .muted {
   display: none;
 }
@@ -1002,6 +1031,88 @@ textarea::placeholder {
 .brick-list {
   display: grid;
   gap: 12px;
+}
+
+.brick-list.is-hidden {
+  display: none;
+}
+
+.palette-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.palette-tab {
+  border: 1px solid var(--line);
+  background: var(--accent);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.palette-tab.is-active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+.schedule-list {
+  display: none;
+  gap: 12px;
+}
+
+.schedule-list.is-active {
+  display: grid;
+}
+
+.schedule-card {
+  border: 1px solid var(--line);
+  background: var(--accent);
+  padding: 12px;
+  border-radius: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-card h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.schedule-card .muted {
+  font-size: 12px;
+}
+
+.schedule-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--muted);
+  width: fit-content;
+}
+
+.schedule-status.is-ok {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+
+.schedule-status.is-error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+}
+
+.schedule-status.is-running {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
 }
 
 .brick-tile {

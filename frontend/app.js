@@ -89,6 +89,8 @@ const registerFeedback = document.getElementById("register-feedback");
 const goRegisterButton = document.getElementById("go-register");
 const goLoginButton = document.getElementById("go-login");
 const workflowPalette = document.getElementById("workflow-bricks");
+const workflowSchedulesList = document.getElementById("workflow-schedules");
+const workflowPaletteTabs = document.querySelectorAll(".palette-tab");
 const workflowCanvas = document.getElementById("workflow-canvas");
 const workflowNodesLayer = document.getElementById("workflow-nodes");
 const workflowEdgesLayer = document.getElementById("workflow-edges");
@@ -123,6 +125,12 @@ const workflowSaveClose = document.getElementById("workflow-save-close");
 const workflowSaveCancel = document.getElementById("workflow-save-cancel");
 const workflowSaveConfirm = document.getElementById("workflow-save-confirm");
 const workflowSaveFeedback = document.getElementById("workflow-save-feedback");
+const workflowSaveScheduleToggle = document.getElementById(
+  "workflow-save-schedule-toggle"
+);
+const workflowSaveCron = document.getElementById("workflow-save-cron");
+const workflowSaveTimezone = document.getElementById("workflow-save-timezone");
+const workflowSaveSchedule = document.querySelector(".workflow-save-schedule");
 const workflowStatus = document.getElementById("workflow-status");
 const workflowClearButton = document.getElementById("workflow-clear");
 const workflowSaveButton = document.getElementById("workflow-save");
@@ -156,6 +164,8 @@ let confirmResolver = null;
 let scheduleContext = null;
 const WORKFLOW_STORAGE_KEY = "locker-workflow-draft";
 const WORKFLOW_NAME_KEY = "locker-workflow-name";
+const WORKFLOW_ID_KEY = "locker-workflow-id";
+const WORKFLOW_SCHEDULE_KEY = "locker-workflow-schedule";
 const workflowState = {
   nodes: [],
   edges: [],
@@ -163,6 +173,7 @@ const workflowState = {
   connectingFrom: null,
   connectingPosition: null,
   loaded: false,
+  workflowId: null,
 };
 const workflowViewport = {
   scale: 1,
@@ -183,6 +194,8 @@ let workflowMenuEdge = null;
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowTableNodeId = null;
+let workflowPaletteTab = "bricks";
+let workflowSchedulesCache = [];
 const WORKFLOW_RESULT_LIMIT = 60000;
 const WORKFLOW_DEFAULT_OUTPUT_PATH = "data.item";
 const WEBHOOK_DEFAULT_TIMEOUT_SECONDS = 60;
@@ -296,6 +309,101 @@ async function apiFetch(url, options = {}) {
   }
 }
 
+function getDefaultTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function loadWorkflowScheduleDraft() {
+  const raw = window.localStorage.getItem(WORKFLOW_SCHEDULE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWorkflowScheduleDraft(data) {
+  if (!data) {
+    window.localStorage.removeItem(WORKFLOW_SCHEDULE_KEY);
+    return;
+  }
+  window.localStorage.setItem(WORKFLOW_SCHEDULE_KEY, JSON.stringify(data));
+}
+
+function updateWorkflowScheduleVisibility() {
+  if (!workflowSaveSchedule || !workflowSaveScheduleToggle) return;
+  workflowSaveSchedule.classList.toggle(
+    "is-active",
+    workflowSaveScheduleToggle.checked
+  );
+  if (workflowSaveCron) {
+    workflowSaveCron.toggleAttribute("required", workflowSaveScheduleToggle.checked);
+  }
+}
+
+function setWorkflowScheduleFields(data = {}) {
+  if (!workflowSaveScheduleToggle || !workflowSaveCron || !workflowSaveTimezone) return;
+  const enabled = Boolean(data.enabled);
+  workflowSaveScheduleToggle.checked = enabled;
+  workflowSaveCron.value = data.cron || "";
+  const tz = data.timezone || getDefaultTimezone();
+  workflowSaveTimezone.value = tz;
+  updateWorkflowScheduleVisibility();
+}
+
+async function fetchWorkflowSchedule(workflowId) {
+  if (!workflowId) return null;
+  try {
+    const response = await apiFetch(`/api/workflows/${workflowId}/schedule`);
+    if (response.status === 404) return null;
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function getWorkflowSchedulePayload() {
+  if (!workflowSaveScheduleToggle || !workflowSaveCron || !workflowSaveTimezone) {
+    return null;
+  }
+  if (!workflowSaveScheduleToggle.checked) {
+    return null;
+  }
+  const cron = workflowSaveCron.value.trim();
+  const timezone = workflowSaveTimezone.value.trim() || getDefaultTimezone();
+  if (!cron) {
+    if (workflowSaveFeedback) {
+      workflowSaveFeedback.textContent = "Informe a expressao cron.";
+      workflowSaveFeedback.className = "feedback is-warning";
+    }
+    return { error: "cron" };
+  }
+  return { cron, timezone, enabled: true };
+}
+
+function captureWorkflowScheduleDraft() {
+  if (!workflowSaveScheduleToggle || !workflowSaveCron || !workflowSaveTimezone) {
+    return;
+  }
+  const draft = {
+    enabled: workflowSaveScheduleToggle.checked,
+    cron: workflowSaveCron.value.trim(),
+    timezone: workflowSaveTimezone.value.trim(),
+  };
+  if (!draft.enabled && !draft.cron && !draft.timezone) {
+    saveWorkflowScheduleDraft(null);
+    return;
+  }
+  saveWorkflowScheduleDraft(draft);
+}
+
 const WORKFLOW_BRICKS = [
   {
     type: "start",
@@ -360,7 +468,10 @@ const WORKFLOW_BRICKS = [
       const targetLabel = Number(node.config?.targetType ?? 0) === 1
         ? "Hostname"
         : "Usuario";
-      const targets = node.output?.data?.item?.targets;
+      const outputItem = node.output?.data?.item;
+      const targets = Array.isArray(outputItem)
+        ? outputItem
+        : outputItem?.targets;
       const count = Array.isArray(targets) ? targets.length : 0;
       return count ? `${actionLabel} ${targetLabel}: ${count}` : `${actionLabel} ${targetLabel}`;
     },
@@ -772,6 +883,8 @@ function setWorkflowZoom(nextScale, clientX, clientY) {
 function loadWorkflowState() {
   if (workflowState.loaded) return;
   workflowState.loaded = true;
+  const storedId = Number(window.localStorage.getItem(WORKFLOW_ID_KEY));
+  workflowState.workflowId = Number.isFinite(storedId) ? storedId : null;
   const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
   if (!raw) return;
   try {
@@ -890,12 +1003,69 @@ async function saveWorkflowToServer(name) {
       return;
     }
 
+    const data = await response.json();
+    const workflowId = Number(data?.id);
+    if (Number.isFinite(workflowId)) {
+      workflowState.workflowId = workflowId;
+      window.localStorage.setItem(WORKFLOW_ID_KEY, String(workflowId));
+    }
+
+    const schedulePayload = getWorkflowSchedulePayload();
+    if (schedulePayload?.error) {
+      return;
+    }
+
+    if (schedulePayload && !Number.isFinite(workflowId)) {
+      if (workflowSaveFeedback) {
+        workflowSaveFeedback.textContent =
+          "Fluxo salvo, mas nao foi possivel agendar (ID invalido).";
+        workflowSaveFeedback.className = "feedback is-error";
+      }
+      return;
+    }
+
+    if (schedulePayload && Number.isFinite(workflowId)) {
+      const scheduleResponse = await apiFetch(
+        `/api/workflows/${workflowId}/schedule`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(schedulePayload),
+        }
+      );
+      if (!scheduleResponse.ok) {
+        const scheduleText = await scheduleResponse.text();
+        if (workflowSaveFeedback) {
+          workflowSaveFeedback.textContent =
+            scheduleText || "Fluxo salvo, mas falha ao agendar.";
+          workflowSaveFeedback.className = "feedback is-error";
+        }
+        setWorkflowStatus(
+          "Fluxo salvo, mas falha ao salvar o agendamento.",
+          "warning"
+        );
+        return;
+      }
+      saveWorkflowScheduleDraft({
+        enabled: true,
+        cron: schedulePayload.cron,
+        timezone: schedulePayload.timezone,
+      });
+    } else if (!schedulePayload) {
+      saveWorkflowScheduleDraft(null);
+    }
+
     window.localStorage.setItem(WORKFLOW_NAME_KEY, trimmed);
     if (workflowSaveFeedback) {
-      workflowSaveFeedback.textContent = "Fluxo salvo.";
+      workflowSaveFeedback.textContent = schedulePayload
+        ? "Fluxo e agendamento salvos."
+        : "Fluxo salvo.";
       workflowSaveFeedback.className = "feedback is-success";
     }
-    setWorkflowStatus("Fluxo salvo no banco.", "success");
+    setWorkflowStatus(
+      schedulePayload ? "Fluxo e agendamento salvos." : "Fluxo salvo no banco.",
+      "success"
+    );
     closeWorkflowSaveModal();
   } catch (err) {
     if (workflowSaveFeedback) {
@@ -906,7 +1076,7 @@ async function saveWorkflowToServer(name) {
   }
 }
 
-function applyWorkflowDefinition(definition, name) {
+function applyWorkflowDefinition(definition, name, workflowId) {
   const parsed = definition || {};
   if (!Array.isArray(parsed.nodes)) {
     if (workflowLoadFeedback) {
@@ -941,6 +1111,16 @@ function applyWorkflowDefinition(definition, name) {
   workflowState.selectedNodeId = null;
   workflowState.connectingFrom = null;
   workflowState.connectingPosition = null;
+  workflowState.workflowId =
+    Number.isFinite(Number(workflowId)) ? Number(workflowId) : null;
+  if (workflowState.workflowId) {
+    window.localStorage.setItem(
+      WORKFLOW_ID_KEY,
+      String(workflowState.workflowId)
+    );
+  } else {
+    window.localStorage.removeItem(WORKFLOW_ID_KEY);
+  }
   saveWorkflowState();
   renderWorkflow();
   renderWorkflowInspectorPanel();
@@ -1045,7 +1225,7 @@ async function loadWorkflowFromServer(id) {
     if (data?.name) {
       window.localStorage.setItem(WORKFLOW_NAME_KEY, data.name);
     }
-    applyWorkflowDefinition(data?.definition, data?.name);
+    applyWorkflowDefinition(data?.definition, data?.name, data?.id);
   } catch (err) {
     if (workflowLoadFeedback) {
       workflowLoadFeedback.textContent =
@@ -1419,8 +1599,64 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
   };
 }
 
+function buildBlockConfiguredItem(config, targetValue, options = {}) {
+  const actionType = normalizeNumber(config?.actionType) ?? 0;
+  const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
+  const startDate = normalizeDateTime(config?.startDate);
+  const endDate = normalizeDateTime(config?.endDate);
+  const recurrenceType = normalizeNumber(config?.recurrenceType);
+  const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
+  const resolvedStartTime =
+    options.startTime !== undefined ? options.startTime : config?.startTime;
+  const resolvedEndTime =
+    options.endTime !== undefined ? options.endTime : config?.endTime;
+  const startTime = normalizeTimeForApi(resolvedStartTime);
+  const endTime = normalizeTimeForApi(resolvedEndTime);
+  const targetType = normalizeNumber(config?.targetType) ?? 0;
+  const message =
+    normalizeText(config?.message) ||
+    (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+
+  return {
+    message,
+    actionType,
+    scheduleType,
+    startDate,
+    endDate,
+    recurrenceType: scheduleType === 1 ? recurrenceType : null,
+    daysOfWeek: scheduleType === 1 && daysOfWeek.length ? daysOfWeek : null,
+    startTime: scheduleType === 1 ? startTime : null,
+    endTime: scheduleType === 1 ? endTime : null,
+    targetType,
+    targetValue: normalizeText(targetValue),
+    sourceMode: config?.sourceMode || "data",
+    sourcePath: normalizeText(config?.sourcePath) || null,
+    valuePath: normalizeText(config?.valuePath) || null,
+    timeSource: config?.timeSource || "manual",
+    startTimePath: normalizeText(config?.startTimePath) || null,
+    endTimePath: normalizeText(config?.endTimePath) || null,
+  };
+}
+
 function getBlockDisplayTargets(node) {
-  const outputTargets = node?.output?.data?.item?.targets;
+  const outputItem = node?.output?.data?.item;
+  if (Array.isArray(outputItem) && outputItem.length) {
+    return outputItem
+      .map((item) => {
+        if (isPrimitive(item)) return String(item);
+        if (item && typeof item === "object") {
+          return (
+            item.targetValue ??
+            item.target ??
+            item.value ??
+            null
+          );
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }
+  const outputTargets = outputItem?.targets;
   if (Array.isArray(outputTargets) && outputTargets.length) return outputTargets;
   const resultTargets = node?.lastResult?.targets;
   if (Array.isArray(resultTargets) && resultTargets.length) return resultTargets;
@@ -1619,6 +1855,28 @@ function deleteWorkflowEdge(edgeId) {
   scheduleWorkflowEdgesRender();
 }
 
+function removeWorkflowNodeEdges(nodeId) {
+  if (!nodeId) return;
+  const hasEdges = workflowState.edges.some(
+    (edge) => edge.from === nodeId || edge.to === nodeId
+  );
+  if (!hasEdges) {
+    setWorkflowStatus("Nenhuma ligacao para remover.", "warning");
+    return;
+  }
+  workflowState.edges = workflowState.edges.filter(
+    (edge) => edge.from !== nodeId && edge.to !== nodeId
+  );
+  if (workflowState.connectingFrom === nodeId) {
+    workflowState.connectingFrom = null;
+    workflowState.connectingPosition = null;
+  }
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  setWorkflowStatus("Ligacoes removidas.", "success");
+}
+
 function deleteWorkflowNode(nodeId) {
   if (!nodeId) return;
   workflowState.nodes = workflowState.nodes.filter((item) => item.id !== nodeId);
@@ -1658,6 +1916,9 @@ function openWorkflowMenu(x, y, nodeId) {
   const viewTableItem = workflowMenu.querySelector(
     '.context-item[data-action="view-table"]'
   );
+  const removeLinksItem = workflowMenu.querySelector(
+    '.context-item[data-action="remove-links"]'
+  );
   const isStart = node?.type === "start";
   const isWebhook = node?.type === "webhook";
   const isBlock = node?.type === "block";
@@ -1679,6 +1940,13 @@ function openWorkflowMenu(x, y, nodeId) {
     viewTableItem.style.display = isTable ? "" : "none";
     const hasData = node?.tableData?.rows?.length;
     viewTableItem.classList.toggle("is-disabled", !hasData);
+  }
+  if (removeLinksItem) {
+    const hasEdges = workflowState.edges.some(
+      (edge) => edge.from === nodeId || edge.to === nodeId
+    );
+    removeLinksItem.style.display = node ? "" : "none";
+    removeLinksItem.classList.toggle("is-disabled", !hasEdges);
   }
   workflowMenu.classList.add("is-open");
   workflowMenu.style.left = `${x}px`;
@@ -1812,12 +2080,31 @@ function closeWorkflowLoadModal() {
   if (workflowLoadFeedback) workflowLoadFeedback.textContent = "";
 }
 
-function openWorkflowSaveModal() {
+async function openWorkflowSaveModal() {
   if (!workflowSaveModal || !workflowSaveName) return;
   const lastName = window.localStorage.getItem(WORKFLOW_NAME_KEY) || "";
   workflowSaveName.value = lastName;
   if (workflowSaveFeedback) workflowSaveFeedback.textContent = "";
+  const draft = loadWorkflowScheduleDraft();
+  if (draft) {
+    setWorkflowScheduleFields(draft);
+  } else {
+    setWorkflowScheduleFields({ enabled: false, timezone: getDefaultTimezone() });
+  }
   workflowSaveModal.classList.add("is-open");
+  const workflowId =
+    workflowState.workflowId ||
+    Number(window.localStorage.getItem(WORKFLOW_ID_KEY));
+  if (workflowId) {
+    fetchWorkflowSchedule(workflowId).then((schedule) => {
+      if (!schedule) return;
+      setWorkflowScheduleFields({
+        enabled: Boolean(schedule.enabled),
+        cron: schedule.cron,
+        timezone: schedule.timezone,
+      });
+    });
+  }
   setTimeout(() => {
     workflowSaveName.focus();
     workflowSaveName.select();
@@ -2222,83 +2509,83 @@ function getExecutionOrder(startNodeId) {
 async function executeWorkflowFromStart(startNode) {
   if (!startNode) return;
   setWorkflowRunning(true);
-  const order = getExecutionOrder(startNode.id);
-  setNodeExecutionStatus(startNode, null);
-  order.forEach((node) => {
-    node.execStatus = null;
-  });
-  saveWorkflowState();
-  renderWorkflow();
-
-  if (!order.length) {
-    setWorkflowStatus("Nenhum bloco conectado ao inicio.", "warning");
-    setNodeExecutionStatus(startNode, "warning");
+  try {
+    const order = getExecutionOrder(startNode.id);
+    setNodeExecutionStatus(startNode, null);
+    order.forEach((node) => {
+      node.execStatus = null;
+    });
+    saveWorkflowState();
     renderWorkflow();
-    setWorkflowRunning(false);
-    return;
-  }
 
-  setWorkflowStatus("Executando fluxo...", "success");
-  let hasWarning = false;
+    if (!order.length) {
+      setWorkflowStatus("Nenhum bloco conectado ao inicio.", "warning");
+      setNodeExecutionStatus(startNode, "warning");
+      renderWorkflow();
+      return;
+    }
 
-  for (const node of order) {
-    if (node.type === "webhook") {
-      const result = await executeWebhookNode(node);
-      if (node.execStatus === "warning") {
-        hasWarning = true;
-        setWorkflowStatus("Parametros faltando no webhook.", "warning");
-        break;
-      }
-      if (!result.ok || result.timedOut) {
-        const errorMessage = result.timedOut
-          ? "Timeout no webhook."
-          : "Falha ao executar webhook.";
-        setWorkflowStatus(errorMessage, "error");
-        setNodeExecutionStatus(startNode, "error");
-        renderWorkflow();
-        setWorkflowRunning(false);
-        return;
-      }
-    } else if (node.type === "filter") {
-      const result = executeFilterNode(node);
-      if (!result.ok) {
-        hasWarning = true;
-        setWorkflowStatus("Filtro nao executado.", "warning");
-        break;
-      }
-    } else if (node.type === "block") {
-      const result = await executeBlockNode(node);
-      if (!result.ok) {
-        if (result.level === "warning") {
+    setWorkflowStatus("Executando fluxo...", "success");
+    let hasWarning = false;
+
+    for (const node of order) {
+      if (node.type === "webhook") {
+        const result = await executeWebhookNode(node);
+        if (node.execStatus === "warning") {
           hasWarning = true;
-          setWorkflowStatus("Bloqueio nao executado.", "warning");
+          setWorkflowStatus("Parametros faltando no webhook.", "warning");
           break;
         }
-        setWorkflowStatus("Falha ao processar bloqueio.", "error");
-        setNodeExecutionStatus(startNode, "error");
-        renderWorkflow();
-        setWorkflowRunning(false);
-        return;
-      }
-      if (result.level === "warning") {
-        hasWarning = true;
-      }
-    } else if (node.type === "table") {
-      refreshTableFromUpstream(node);
-      if (node.execStatus === "warning") {
-        hasWarning = true;
+        if (!result.ok || result.timedOut) {
+          const errorMessage = result.timedOut
+            ? "Timeout no webhook."
+            : "Falha ao executar webhook.";
+          setWorkflowStatus(errorMessage, "error");
+          setNodeExecutionStatus(startNode, "error");
+          renderWorkflow();
+          return;
+        }
+      } else if (node.type === "filter") {
+        const result = executeFilterNode(node);
+        if (!result.ok) {
+          hasWarning = true;
+          setWorkflowStatus("Filtro nao executado.", "warning");
+          break;
+        }
+      } else if (node.type === "block") {
+        const result = await executeBlockNode(node);
+        if (!result.ok) {
+          if (result.level === "warning") {
+            hasWarning = true;
+            setWorkflowStatus("Bloqueio nao executado.", "warning");
+            break;
+          }
+          setWorkflowStatus("Falha ao processar bloqueio.", "error");
+          setNodeExecutionStatus(startNode, "error");
+          renderWorkflow();
+          return;
+        }
+        if (result.level === "warning") {
+          hasWarning = true;
+        }
+      } else if (node.type === "table") {
+        refreshTableFromUpstream(node);
+        if (node.execStatus === "warning") {
+          hasWarning = true;
+        }
       }
     }
-  }
 
-  setNodeExecutionStatus(startNode, hasWarning ? "warning" : "success");
-  setWorkflowStatus(
-    hasWarning ? "Fluxo concluido com alertas." : "Fluxo executado.",
-    hasWarning ? "warning" : "success"
-  );
-  saveWorkflowState();
-  renderWorkflow();
-  setWorkflowRunning(false);
+    setNodeExecutionStatus(startNode, hasWarning ? "warning" : "success");
+    setWorkflowStatus(
+      hasWarning ? "Fluxo concluido com alertas." : "Fluxo executado.",
+      hasWarning ? "warning" : "success"
+    );
+    saveWorkflowState();
+    renderWorkflow();
+  } finally {
+    setWorkflowRunning(false);
+  }
 }
 
 function buildWebhookRequest(node) {
@@ -2566,6 +2853,18 @@ async function executeBlockNode(node) {
   }
 
   const targetList = targets.map((item) => item.target ?? item);
+  const configuredItems = targets.map((targetInfo) => {
+    const target = targetInfo.target ?? targetInfo;
+    const entry = targetInfo.entry;
+    const timeOverrides =
+      timeSource === "dynamic"
+        ? {
+            startTime: getTimeValueFromEntry(entry, node.config?.startTimePath),
+            endTime: getTimeValueFromEntry(entry, node.config?.endTimePath),
+          }
+        : {};
+    return buildBlockConfiguredItem(node.config || {}, target, timeOverrides);
+  });
   const responses = [];
   let successCount = 0;
   let failedCount = 0;
@@ -2642,16 +2941,6 @@ async function executeBlockNode(node) {
     }
   }
 
-  const output = {
-    actionType: Number(node.config?.actionType ?? 0),
-    targetType: Number(node.config?.targetType ?? 0),
-    targets: responses.filter((item) => item.ok).map((item) => item.target),
-    failedTargets: responses.filter((item) => !item.ok).map((item) => item.target),
-    total: targetList.length,
-    successCount,
-    failedCount,
-  };
-
   node.lastResult = {
     kind: "block",
     ok: failedCount === 0 && successCount > 0,
@@ -2664,7 +2953,7 @@ async function executeBlockNode(node) {
   };
   node.lastRunAt = new Date().toISOString();
 
-  setNodeOutputItem(node, output);
+  setNodeOutputItem(node, configuredItems);
 
   if (successCount === 0) {
     setNodeExecutionStatus(node, "error");
@@ -3753,6 +4042,9 @@ function initializeWorkflow() {
       workflowState.edges = [];
       workflowState.selectedNodeId = null;
       workflowState.connectingFrom = null;
+      workflowState.workflowId = null;
+      window.localStorage.removeItem(WORKFLOW_ID_KEY);
+      saveWorkflowScheduleDraft(null);
       saveWorkflowState();
       renderWorkflow();
       renderWorkflowInspectorPanel();
@@ -3843,6 +4135,11 @@ function initializeWorkflow() {
           openWorkflowTableModal(workflowMenuNodeId);
         }
       }
+      if (action === "remove-links") {
+        if (workflowMenuNodeId) {
+          removeWorkflowNodeEdges(workflowMenuNodeId);
+        }
+      }
       if (action === "delete") {
         deleteWorkflowNode(workflowMenuNodeId);
       }
@@ -3931,6 +4228,27 @@ function initializeWorkflow() {
         event.preventDefault();
         saveWorkflowToServer(workflowSaveName.value || "");
       }
+    });
+  }
+  if (workflowSaveScheduleToggle) {
+    workflowSaveScheduleToggle.addEventListener("change", () => {
+      updateWorkflowScheduleVisibility();
+      if (workflowSaveScheduleToggle.checked && workflowSaveTimezone) {
+        if (!workflowSaveTimezone.value.trim()) {
+          workflowSaveTimezone.value = getDefaultTimezone();
+        }
+      }
+      captureWorkflowScheduleDraft();
+    });
+  }
+  if (workflowSaveCron) {
+    workflowSaveCron.addEventListener("input", () => {
+      captureWorkflowScheduleDraft();
+    });
+  }
+  if (workflowSaveTimezone) {
+    workflowSaveTimezone.addEventListener("input", () => {
+      captureWorkflowScheduleDraft();
     });
   }
 
