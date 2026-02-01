@@ -105,6 +105,7 @@ const workflowInspectorPanel = document.querySelector(".workflow-inspector");
 const workflowMenu = document.getElementById("workflow-menu");
 const workflowEdgeMenu = document.getElementById("workflow-edge-menu");
 const workflowScheduleMenu = document.getElementById("workflow-schedule-menu");
+const workflowVariablesMenu = document.getElementById("workflow-variables-menu");
 const workflowModal = document.getElementById("workflow-modal");
 const workflowModalBody = document.getElementById("workflow-modal-body");
 const workflowModalClose = document.getElementById("workflow-modal-close");
@@ -205,7 +206,9 @@ const xoneCheckpointCache = new Map();
 const xoneCheckpointLoading = new Map();
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
+let workflowVariablesContext = null;
 let workflowTableNodeId = null;
+let workflowItemsData = null;
 let workflowPaletteTab = "bricks";
 let workflowSchedulesCache = [];
 const WORKFLOW_RESULT_LIMIT = 60000;
@@ -913,7 +916,9 @@ const WORKFLOW_BRICKS = [
         label: "Filtros (PostgREST)",
         type: "textarea",
         placeholder: "status=eq.active\ncreated_date_local=gte.2026-02-01T00:00:00Z",
+        hint: "Dica: use {{campo}} (ex: username=eq.{{username}}).",
         excludeFromSummary: true,
+        supportsVariables: true,
       },
       {
         key: "filtersHelp",
@@ -2519,6 +2524,9 @@ function openWorkflowMenu(x, y, nodeId) {
   const viewTableItem = workflowMenu.querySelector(
     '.context-item[data-action="view-table"]'
   );
+  const viewItemsItem = workflowMenu.querySelector(
+    '.context-item[data-action="view-items"]'
+  );
   const removeLinksItem = workflowMenu.querySelector(
     '.context-item[data-action="remove-links"]'
   );
@@ -2546,6 +2554,12 @@ function openWorkflowMenu(x, y, nodeId) {
     viewTableItem.style.display = isTable ? "" : "none";
     const hasData = node?.tableData?.rows?.length;
     viewTableItem.classList.toggle("is-disabled", !hasData);
+  }
+  if (viewItemsItem) {
+    viewItemsItem.style.display = node ? "" : "none";
+    const { items } = getUpstreamDataItems(node);
+    const hasItems = items !== null && !isEmptyDataItem(items);
+    viewItemsItem.classList.toggle("is-disabled", !hasItems);
   }
   if (removeLinksItem) {
     const hasEdges = workflowState.edges.some(
@@ -2693,6 +2707,7 @@ function openWorkflowTableModal(nodeId) {
   if (!workflowTableModal || !workflowTableBody) return;
   const node = workflowState.nodes.find((item) => item.id === nodeId);
   if (!node) return;
+  workflowItemsData = null;
   workflowTableNodeId = nodeId;
   if (workflowTableTitle) {
     const displayName = getNodeDisplayName(node);
@@ -2708,7 +2723,35 @@ function closeWorkflowTableModal() {
   if (!workflowTableModal) return;
   workflowTableModal.classList.remove("is-open");
   workflowTableNodeId = null;
+  workflowItemsData = null;
   if (workflowTableBody) workflowTableBody.innerHTML = "";
+}
+
+function openWorkflowItemsModal(nodeId) {
+  if (!workflowTableModal || !workflowTableBody) return;
+  const node = workflowState.nodes.find((item) => item.id === nodeId);
+  if (!node) return;
+  const { upstream, items } = getUpstreamDataItems(node);
+  if (!upstream || items === null || isEmptyDataItem(items)) {
+    setWorkflowStatus("Nenhum data.items disponivel no passo anterior.", "warning");
+    return;
+  }
+  const normalized = normalizeTableData(items);
+  workflowItemsData = {
+    columns: normalized.columns,
+    rows: normalized.rows,
+    sourceNodeId: upstream.id,
+    updatedAt: new Date().toISOString(),
+  };
+  workflowTableNodeId = null;
+  if (workflowTableTitle) {
+    const displayName = getNodeDisplayName(upstream);
+    workflowTableTitle.textContent = displayName
+      ? `Data.items: ${displayName}`
+      : "Data.items";
+  }
+  workflowTableModal.classList.add("is-open");
+  renderWorkflowTableModal();
 }
 
 function openWorkflowLoadModal() {
@@ -2805,14 +2848,19 @@ function renderWorkflowResponseModal() {
 function renderWorkflowTableModal() {
   if (!workflowTableModal || !workflowTableBody) return;
   if (!workflowTableModal.classList.contains("is-open")) return;
-  const node = workflowState.nodes.find(
-    (item) => item.id === workflowTableNodeId
-  );
-  if (!node) {
-    closeWorkflowTableModal();
-    return;
+  let data = null;
+  if (workflowItemsData) {
+    data = workflowItemsData;
+  } else {
+    const node = workflowState.nodes.find(
+      (item) => item.id === workflowTableNodeId
+    );
+    if (!node) {
+      closeWorkflowTableModal();
+      return;
+    }
+    data = node.tableData;
   }
-  const data = node.tableData;
   workflowTableBody.innerHTML = "";
   if (!data || !data.columns || data.columns.length === 0) {
     workflowTableBody.textContent = "Sem dados para exibir.";
@@ -3112,6 +3160,25 @@ function getNodeOutputItem(node) {
   return node?.output?.data?.item;
 }
 
+function extractDataItems(value) {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value.items)) return value.items;
+  if (Array.isArray(value.data?.items)) return value.data.items;
+  if (Array.isArray(value.data?.item)) return value.data.item;
+  if (value.data?.item !== undefined) return value.data.item;
+  return value;
+}
+
+function getUpstreamDataItems(node) {
+  const upstream = getUpstreamNode(node);
+  if (!upstream) return { upstream: null, items: null };
+  const item = getNodeOutputItem(upstream);
+  const resolved = extractDataItems(item);
+  return { upstream, items: resolved };
+}
+
 function isPrimitiveValue(value) {
   return (
     value === null ||
@@ -3406,6 +3473,27 @@ function getNodeDefaultItem(node, result) {
     return getDefaultDataItem(payload);
   }
   return getValueByPath(payload, responsePath);
+}
+
+function getVariableSuggestions(node) {
+  const upstream = getUpstreamNode(node);
+  if (!upstream) return [];
+  const item = getNodeOutputItem(upstream);
+  if (Array.isArray(item)) {
+    const sample =
+      item.find((entry) => entry && typeof entry === "object") ??
+      item.find((entry) => entry !== undefined && entry !== null);
+    if (!sample) return [];
+    if (isPrimitiveValue(sample)) return ["value"];
+    const flat = flattenObject(sample, { maxDepth: 4, keepNull: true });
+    return Object.keys(flat).filter(Boolean).sort();
+  }
+  if (isPrimitiveValue(item)) return ["value"];
+  if (item && typeof item === "object") {
+    const flat = flattenObject(item, { maxDepth: 4, keepNull: true });
+    return Object.keys(flat).filter(Boolean).sort();
+  }
+  return [];
 }
 
 function propagateNodeOutput(sourceNode) {
@@ -4150,7 +4238,7 @@ function renderWorkflow() {
     }
 
     if (node.type === "block") {
-      nodeEl.classList.add("is-block");
+      nodeEl.classList.add("is-block", "is-xone-locker");
 
       const removeButton = document.createElement("button");
       removeButton.type = "button";
@@ -4284,6 +4372,305 @@ function renderWorkflow() {
       });
 
       actions.append(scheduleChip);
+
+      const responseChip = document.createElement("button");
+      responseChip.type = "button";
+      responseChip.className = "block-chip block-chip-action";
+      responseChip.textContent = "Ver retorno";
+      responseChip.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+      responseChip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openWorkflowResponseModal(node.id);
+      });
+      actions.append(responseChip);
+
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      const portIn = document.createElement("span");
+      portIn.className = "node-port in";
+      portIn.dataset.nodeId = node.id;
+      portIn.dataset.port = "in";
+      if (workflowState.connectingFrom && workflowState.connectingFrom !== node.id) {
+        portIn.classList.add("is-available");
+      }
+      const portOut = document.createElement("span");
+      portOut.className = "node-port out";
+      portOut.dataset.nodeId = node.id;
+      portOut.dataset.port = "out";
+      if (workflowState.connectingFrom === node.id) {
+        portOut.classList.add("is-connecting");
+      }
+      ports.append(portIn, portOut);
+
+      nodeEl.append(removeButton, blockHeader, body, meta, actions, ports);
+
+      nodeEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+      });
+
+      nodeEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      portOut.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        startWorkflowConnection(node.id, event);
+      });
+      portIn.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+
+      bindWorkflowNodeDrag(nodeEl, node);
+      workflowNodesLayer.append(nodeEl);
+      return;
+    }
+
+    if (node.type === "xone-collaborators") {
+      nodeEl.classList.add("is-block", "is-xone-collaborators");
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "node-delete block-delete";
+      removeButton.setAttribute("aria-label", "Excluir bloco");
+      removeButton.textContent = "x";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteWorkflowNode(node.id);
+      });
+
+      const blockHeader = document.createElement("div");
+      blockHeader.className = "block-header";
+      const headerLabel = document.createElement("div");
+      headerLabel.className = "block-header-title";
+      headerLabel.textContent = displayTitle || "Get xOne Collaborators";
+      headerLabel.title = headerLabel.textContent;
+      blockHeader.append(headerLabel);
+
+      const avatar = document.createElement("div");
+      avatar.className = "block-avatar";
+      const icon = document.createElement("img");
+      icon.src = "icons/xone-icon-x-square.svg";
+      icon.alt = "";
+      icon.className = "is-xone";
+      avatar.append(icon);
+
+      const endpoint =
+        def?.fixedConfig?.url ||
+        String(node.config?.url || "").trim() ||
+        "register-api.xonecloud.com/collaborators/api/v1";
+
+      const main = document.createElement("div");
+      main.className = "block-main";
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = `Endpoint: ${endpoint}`;
+      title.title = title.textContent;
+      const subtitle = document.createElement("div");
+      subtitle.className = "block-sub";
+      subtitle.textContent = "Busca colaboradores no xOne";
+      main.append(title, subtitle);
+
+      const body = document.createElement("div");
+      body.className = "block-body";
+      body.append(avatar, main);
+
+      const meta = document.createElement("div");
+      meta.className = "block-meta";
+      const lastRun = node.lastRunAt ? formatDate(node.lastRunAt) : "-";
+      const lastLine = document.createElement("div");
+      lastLine.textContent = `Ultima execucao: ${lastRun}`;
+      meta.append(lastLine);
+
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "badge na";
+      const statusValue = node.lastResult?.status || "-";
+      if (node.execStatus === "success") {
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = `Sucesso (${statusValue})`;
+      } else if (node.execStatus === "error") {
+        statusBadge.className = "badge err";
+        statusBadge.textContent = `Erro (${statusValue})`;
+      } else if (node.execStatus === "warning") {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Parcial";
+      } else {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Sem execucao";
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "block-actions";
+      actions.append(statusBadge);
+
+      const outputItem = getNodeOutputItem(node);
+      const count = Array.isArray(outputItem)
+        ? outputItem.length
+        : outputItem
+          ? 1
+          : 0;
+      const recordsChip = document.createElement("div");
+      recordsChip.className = "block-chip";
+      recordsChip.textContent = `Colaboradores (${count})`;
+      if (!count) recordsChip.classList.add("is-disabled");
+      actions.append(recordsChip);
+
+      const responseChip = document.createElement("button");
+      responseChip.type = "button";
+      responseChip.className = "block-chip block-chip-action";
+      responseChip.textContent = "Ver retorno";
+      responseChip.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+      responseChip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openWorkflowResponseModal(node.id);
+      });
+      actions.append(responseChip);
+
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      const portIn = document.createElement("span");
+      portIn.className = "node-port in";
+      portIn.dataset.nodeId = node.id;
+      portIn.dataset.port = "in";
+      if (workflowState.connectingFrom && workflowState.connectingFrom !== node.id) {
+        portIn.classList.add("is-available");
+      }
+      const portOut = document.createElement("span");
+      portOut.className = "node-port out";
+      portOut.dataset.nodeId = node.id;
+      portOut.dataset.port = "out";
+      if (workflowState.connectingFrom === node.id) {
+        portOut.classList.add("is-connecting");
+      }
+      ports.append(portIn, portOut);
+
+      nodeEl.append(removeButton, blockHeader, body, meta, actions, ports);
+
+      nodeEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+      });
+
+      nodeEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectWorkflowNode(node.id);
+        openWorkflowMenu(event.clientX, event.clientY, node.id);
+      });
+
+      portOut.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        startWorkflowConnection(node.id, event);
+      });
+      portIn.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+
+      bindWorkflowNodeDrag(nodeEl, node);
+      workflowNodesLayer.append(nodeEl);
+      return;
+    }
+
+    if (node.type === "xone-data") {
+      nodeEl.classList.add("is-block", "is-xone-data");
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "node-delete block-delete";
+      removeButton.setAttribute("aria-label", "Excluir bloco");
+      removeButton.textContent = "x";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteWorkflowNode(node.id);
+      });
+
+      const blockHeader = document.createElement("div");
+      blockHeader.className = "block-header";
+      const headerLabel = document.createElement("div");
+      headerLabel.className = "block-header-title";
+      headerLabel.textContent = displayTitle || "xOne Data";
+      headerLabel.title = headerLabel.textContent;
+      blockHeader.append(headerLabel);
+
+      const avatar = document.createElement("div");
+      avatar.className = "block-avatar";
+      const icon = document.createElement("img");
+      icon.src = "icons/xone-icon-x-square.svg";
+      icon.alt = "";
+      icon.className = "is-xone";
+      avatar.append(icon);
+
+      const endpoint = String(node.config?.endpoint || "").trim() || "-";
+      const checkpointEnabled = node.config?.checkpointEnabled !== "no";
+      const checkpointField =
+        String(node.config?.checkpointField || "").trim() || "created_date_local";
+      const checkpointOperator =
+        String(node.config?.checkpointOperator || "").trim() || "gt";
+      const checkpointValue = String(node.config?.checkpointValue || "").trim();
+      const checkpointLabel = checkpointEnabled
+        ? `${checkpointField} ${checkpointOperator} ${checkpointValue || "-"}`
+        : "desativado";
+
+      const main = document.createElement("div");
+      main.className = "block-main";
+      const title = document.createElement("div");
+      title.className = "block-title";
+      title.textContent = `Endpoint: ${endpoint}`;
+      title.title = title.textContent;
+      const subtitle = document.createElement("div");
+      subtitle.className = "block-sub";
+      subtitle.textContent = checkpointEnabled ? "Incremental ativo" : "Incremental desativado";
+      main.append(title, subtitle);
+
+      const body = document.createElement("div");
+      body.className = "block-body";
+      body.append(avatar, main);
+
+      const meta = document.createElement("div");
+      meta.className = "block-meta";
+      const checkpointLine = document.createElement("div");
+      checkpointLine.textContent = `Checkpoint: ${checkpointLabel}`;
+      const lastRun = node.lastRunAt ? formatDate(node.lastRunAt) : "-";
+      const lastLine = document.createElement("div");
+      lastLine.textContent = `Ultima execucao: ${lastRun}`;
+      meta.append(checkpointLine, lastLine);
+
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "badge na";
+      const statusValue = node.lastResult?.status || "-";
+      if (node.execStatus === "success") {
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = `Sucesso (${statusValue})`;
+      } else if (node.execStatus === "error") {
+        statusBadge.className = "badge err";
+        statusBadge.textContent = `Erro (${statusValue})`;
+      } else if (node.execStatus === "warning") {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Parcial";
+      } else {
+        statusBadge.className = "badge na";
+        statusBadge.textContent = "Sem execucao";
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "block-actions";
+      actions.append(statusBadge);
+
+      const recordsChip = document.createElement("div");
+      recordsChip.className = "block-chip";
+      const recordsCount = Array.isArray(node.lastResult?.bodyJson)
+        ? node.lastResult.bodyJson.length
+        : 0;
+      recordsChip.textContent = `Registros (${recordsCount})`;
+      if (!recordsCount) recordsChip.classList.add("is-disabled");
+      actions.append(recordsChip);
 
       const responseChip = document.createElement("button");
       responseChip.type = "button";
@@ -4627,6 +5014,13 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         input = document.createElement("textarea");
         input.placeholder = field.placeholder || "";
         input.value = node.config?.[field.key] ?? "";
+        if (field.supportsVariables) {
+          input.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openWorkflowVariablesMenu(event.clientX, event.clientY, node, input);
+          });
+        }
       } else {
         input = document.createElement("input");
         if (field.type === "number") {
@@ -4748,6 +5142,12 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
       }
 
       label.append(input);
+      if (field.hint) {
+        const hint = document.createElement("div");
+        hint.className = "field-hint";
+        hint.textContent = field.hint;
+        label.append(hint);
+      }
       if (field.type !== "conditions") {
         const suggestions = getWorkflowFieldSuggestions(node, field);
         if (
@@ -5150,6 +5550,11 @@ function initializeWorkflow() {
           openWorkflowTableModal(workflowMenuNodeId);
         }
       }
+      if (action === "view-items") {
+        if (workflowMenuNodeId) {
+          openWorkflowItemsModal(workflowMenuNodeId);
+        }
+      }
       if (action === "remove-links") {
         if (workflowMenuNodeId) {
           removeWorkflowNodeEdges(workflowMenuNodeId);
@@ -5474,6 +5879,51 @@ if (controlMenu) {
     if (!group) return;
     handleControlAction(action, group);
     closeControlMenu();
+  });
+}
+
+if (workflowVariablesMenu) {
+  document.addEventListener("click", (event) => {
+    if (workflowVariablesMenu.contains(event.target)) return;
+    closeWorkflowVariablesMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeWorkflowVariablesMenu();
+  });
+
+  document.addEventListener(
+    "scroll",
+    () => {
+      closeWorkflowVariablesMenu();
+    },
+    true
+  );
+
+  workflowVariablesMenu.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const value = target.dataset.value;
+    if (!value) return;
+    const context = workflowVariablesContext;
+    if (!context?.input) return;
+    const insertValue = `{{${value}}}`;
+    const input = context.input;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = `${input.value.slice(0, start)}${insertValue}${input.value.slice(end)}`;
+    input.selectionStart = input.selectionEnd = start + insertValue.length;
+    if (context.nodeId) {
+      const node = workflowState.nodes.find((item) => item.id === context.nodeId);
+      if (node && node.config) {
+        node.config.filters = input.value;
+      }
+      saveWorkflowState();
+      renderWorkflow();
+      renderWorkflowInspectorPanel();
+      renderWorkflowModal();
+    }
+    closeWorkflowVariablesMenu();
   });
 }
 
@@ -6763,6 +7213,52 @@ function closeControlMenu() {
   if (!controlMenu) return;
   controlMenu.classList.remove("is-open");
   controlMenu.dataset.groupId = "";
+}
+
+function openWorkflowVariablesMenu(x, y, node, input) {
+  if (!workflowVariablesMenu) return;
+  const body = workflowVariablesMenu.querySelector(".context-body");
+  if (!body) return;
+  const suggestions = node ? getVariableSuggestions(node) : [];
+  body.innerHTML = "";
+  if (!suggestions.length) {
+    const empty = document.createElement("div");
+    empty.className = "context-item is-empty";
+    empty.textContent = "Sem variaveis disponiveis.";
+    body.append(empty);
+  } else {
+    suggestions.forEach((key) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "context-item";
+      btn.dataset.value = key;
+      btn.textContent = `{{${key}}}`;
+      body.append(btn);
+    });
+  }
+  workflowVariablesContext = { nodeId: node?.id || null, input };
+  workflowVariablesMenu.classList.add("is-open");
+
+  const padding = 8;
+  workflowVariablesMenu.style.left = `${x}px`;
+  workflowVariablesMenu.style.top = `${y}px`;
+  const rect = workflowVariablesMenu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+  if (rect.right > window.innerWidth - padding) {
+    left = window.innerWidth - rect.width - padding;
+  }
+  if (rect.bottom > window.innerHeight - padding) {
+    top = window.innerHeight - rect.height - padding;
+  }
+  workflowVariablesMenu.style.left = `${Math.max(padding, left)}px`;
+  workflowVariablesMenu.style.top = `${Math.max(padding, top)}px`;
+}
+
+function closeWorkflowVariablesMenu() {
+  if (!workflowVariablesMenu) return;
+  workflowVariablesMenu.classList.remove("is-open");
+  workflowVariablesContext = null;
 }
 
 function openFormForAction({ targetType, targetValue, actionType, startNow }) {

@@ -21,6 +21,7 @@
   --muted: var(--muted-foreground);
   --line: var(--border);
   --primary-dark: oklch(0.85 0 0);
+  --xone-card: #1d284d;
 }
 
 * {
@@ -914,6 +915,23 @@ textarea::placeholder {
   pointer-events: none;
 }
 
+.context-title {
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.context-body {
+  padding: 4px 0 8px;
+}
+
+.context-item.is-empty {
+  cursor: default;
+  color: var(--muted);
+}
+
 .workflow-layout {
   display: block;
   margin-top: 16px;
@@ -1788,6 +1806,12 @@ textarea::placeholder {
   gap: 10px;
   border-radius: 20px;
   background: var(--card);
+}
+
+.workflow-node.is-xone-locker,
+.workflow-node.is-xone-collaborators,
+.workflow-node.is-xone-data {
+  background: var(--xone-card);
 }
 
 .workflow-node.is-block .block-header {
