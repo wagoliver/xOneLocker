@@ -186,15 +186,54 @@
               <div class="workflow-chrome">
                 <div id="workflow-title" class="workflow-title">Fluxo sem nome</div>
                 <div class="workflow-controls">
-                  <button id="workflow-clear" class="ghost">Novo</button>
-                  <button id="workflow-load" class="ghost">Abrir</button>
-                  <button id="workflow-save" class="ghost">Salvar</button>
-                  <div class="zoom-controls">
-                    <button id="workflow-zoom-out" class="ghost" type="button">-</button>
-                    <button id="workflow-zoom-reset" class="ghost" type="button">100%</button>
-                    <button id="workflow-zoom-in" class="ghost" type="button">+</button>
+                  <button id="workflow-clear" class="ghost control-btn" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M6 3h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M14 3v4h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M12 11v6M9 14h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+                      </svg>
+                    </span>
+                    <span class="control-label">Novo</span>
+                  </button>
+                  <button id="workflow-load" class="ghost control-btn" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M3 7h7l2 2h9v8a2 2 0 0 1-2 2H3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                      </svg>
+                    </span>
+                    <span class="control-label">Abrir</span>
+                  </button>
+                  <button id="workflow-save" class="ghost control-btn" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M5 4h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M7 4v6h8V4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <rect x="7" y="14" width="10" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+                      </svg>
+                    </span>
+                    <span class="control-label">Salvar</span>
+                  </button>
+                  <span class="control-separator" aria-hidden="true"></span>
+                  <div class="zoom-pill" role="group" aria-label="Zoom">
+                    <button id="workflow-zoom-out" class="ghost zoom-btn" type="button" aria-label="Diminuir zoom">
+                      <span class="zoom-icon">-</span>
+                    </button>
+                    <button id="workflow-zoom-reset" class="ghost zoom-label" type="button">100%</button>
+                    <button id="workflow-zoom-in" class="ghost zoom-btn" type="button" aria-label="Aumentar zoom">
+                      <span class="zoom-icon">+</span>
+                    </button>
                   </div>
-                  <button id="workflow-run" class="primary">Executar fluxo</button>
+                  <span class="control-separator" aria-hidden="true"></span>
+                  <button id="workflow-run" class="primary control-run" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M6 4l14 8-14 8z" fill="currentColor"></path>
+                      </svg>
+                    </span>
+                    <span class="control-label">Executar fluxo</span>
+                  </button>
                 </div>
                 <aside class="workflow-palette is-collapsed">
                   <div class="palette-header">

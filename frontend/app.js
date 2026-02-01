@@ -249,16 +249,41 @@ function setRole(role) {
 }
 
 const AUTH_TOKEN_KEY = "locker-auth-token";
+const memoryStorage = new Map();
+
+function safeStorageGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return memoryStorage.has(key) ? memoryStorage.get(key) : null;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    memoryStorage.set(key, value);
+  }
+}
+
+function safeStorageRemove(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    memoryStorage.delete(key);
+  }
+}
 
 function getAuthToken() {
-  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+  return safeStorageGet(AUTH_TOKEN_KEY);
 }
 
 function setAuthToken(token) {
   if (token) {
-    window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+    safeStorageSet(AUTH_TOKEN_KEY, token);
   } else {
-    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    safeStorageRemove(AUTH_TOKEN_KEY);
   }
 }
 
@@ -330,7 +355,7 @@ function getDefaultTimezone() {
 }
 
 function loadWorkflowScheduleDraft() {
-  const raw = window.localStorage.getItem(WORKFLOW_SCHEDULE_KEY);
+  const raw = safeStorageGet(WORKFLOW_SCHEDULE_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -342,15 +367,15 @@ function loadWorkflowScheduleDraft() {
 
 function saveWorkflowScheduleDraft(data) {
   if (!data) {
-    window.localStorage.removeItem(WORKFLOW_SCHEDULE_KEY);
+    safeStorageRemove(WORKFLOW_SCHEDULE_KEY);
     return;
   }
-  window.localStorage.setItem(WORKFLOW_SCHEDULE_KEY, JSON.stringify(data));
+  safeStorageSet(WORKFLOW_SCHEDULE_KEY, JSON.stringify(data));
 }
 
 function getXoneConfigCache() {
   if (xoneConfigCache) return xoneConfigCache;
-  const raw = window.localStorage.getItem(XONE_CONFIG_KEY);
+  const raw = safeStorageGet(XONE_CONFIG_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -367,10 +392,10 @@ function getXoneConfigCache() {
 function setXoneConfigCache(data) {
   xoneConfigCache = data || null;
   if (!data) {
-    window.localStorage.removeItem(XONE_CONFIG_KEY);
+    safeStorageRemove(XONE_CONFIG_KEY);
     return;
   }
-  window.localStorage.setItem(XONE_CONFIG_KEY, JSON.stringify(data));
+  safeStorageSet(XONE_CONFIG_KEY, JSON.stringify(data));
 }
 
 async function fetchXoneConfig() {
@@ -884,6 +909,19 @@ const WORKFLOW_BRICKS = [
         dependsOn: { key: "checkpointEnabled", values: ["yes"] },
       },
       {
+        key: "filters",
+        label: "Filtros (PostgREST)",
+        type: "textarea",
+        placeholder: "status=eq.active\ncreated_date_local=gte.2026-02-01T00:00:00Z",
+        excludeFromSummary: true,
+      },
+      {
+        key: "filtersHelp",
+        label: "Docs",
+        type: "link",
+        href: "https://docs.postgrest.org/en/v14/references/api/tables_views.html#get-and-head",
+      },
+      {
         key: "limit",
         label: "Limite (opcional)",
         type: "number",
@@ -1095,7 +1133,7 @@ function setWorkflowStatus(message, tone, options = {}) {
 
 function updateWorkflowTitle(nameOverride) {
   if (!workflowTitle) return;
-  const stored = nameOverride ?? window.localStorage.getItem(WORKFLOW_NAME_KEY);
+  const stored = nameOverride ?? safeStorageGet(WORKFLOW_NAME_KEY);
   const title = stored && String(stored).trim() ? String(stored).trim() : "Fluxo sem nome";
   workflowTitle.textContent = title;
   workflowTitle.title = title;
@@ -1171,9 +1209,9 @@ function setWorkflowZoom(nextScale, clientX, clientY) {
 function loadWorkflowState() {
   if (workflowState.loaded) return;
   workflowState.loaded = true;
-  const storedId = Number(window.localStorage.getItem(WORKFLOW_ID_KEY));
+  const storedId = Number(safeStorageGet(WORKFLOW_ID_KEY));
   workflowState.workflowId = Number.isFinite(storedId) ? storedId : null;
-  const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
+  const raw = safeStorageGet(WORKFLOW_STORAGE_KEY);
   if (!raw) return;
   try {
     const parsed = JSON.parse(raw);
@@ -1228,10 +1266,10 @@ function saveWorkflowState() {
     selectedNodeId: workflowState.selectedNodeId,
   };
   try {
-    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(payload));
+    safeStorageSet(WORKFLOW_STORAGE_KEY, JSON.stringify(payload));
   } catch (err) {
     try {
-      window.localStorage.removeItem(WORKFLOW_STORAGE_KEY);
+      safeStorageRemove(WORKFLOW_STORAGE_KEY);
     } catch {
       // ignore
     }
@@ -1322,7 +1360,7 @@ async function saveWorkflowToServer(name) {
     const workflowId = Number(data?.id);
     if (Number.isFinite(workflowId)) {
       workflowState.workflowId = workflowId;
-      window.localStorage.setItem(WORKFLOW_ID_KEY, String(workflowId));
+      safeStorageSet(WORKFLOW_ID_KEY, String(workflowId));
     }
 
     const schedulePayload = getWorkflowSchedulePayload();
@@ -1376,7 +1414,7 @@ async function saveWorkflowToServer(name) {
       }
     }
 
-    window.localStorage.setItem(WORKFLOW_NAME_KEY, trimmed);
+    safeStorageSet(WORKFLOW_NAME_KEY, trimmed);
     updateWorkflowTitle(trimmed);
     if (workflowSaveFeedback) {
       workflowSaveFeedback.textContent = schedulePayload
@@ -1438,12 +1476,9 @@ function applyWorkflowDefinition(definition, name, workflowId) {
   workflowState.workflowId =
     Number.isFinite(Number(workflowId)) ? Number(workflowId) : null;
   if (workflowState.workflowId) {
-    window.localStorage.setItem(
-      WORKFLOW_ID_KEY,
-      String(workflowState.workflowId)
-    );
+    safeStorageSet(WORKFLOW_ID_KEY, String(workflowState.workflowId));
   } else {
-    window.localStorage.removeItem(WORKFLOW_ID_KEY);
+    safeStorageRemove(WORKFLOW_ID_KEY);
   }
   saveWorkflowState();
   renderWorkflow();
@@ -1790,7 +1825,7 @@ async function loadWorkflowFromServer(id) {
     }
     const data = await response.json();
     if (data?.name) {
-      window.localStorage.setItem(WORKFLOW_NAME_KEY, data.name);
+      safeStorageSet(WORKFLOW_NAME_KEY, data.name);
     }
     applyWorkflowDefinition(data?.definition, data?.name, data?.id);
   } catch (err) {
@@ -2691,7 +2726,7 @@ function closeWorkflowLoadModal() {
 
 async function openWorkflowSaveModal() {
   if (!workflowSaveModal || !workflowSaveName) return;
-  const lastName = window.localStorage.getItem(WORKFLOW_NAME_KEY) || "";
+  const lastName = safeStorageGet(WORKFLOW_NAME_KEY) || "";
   workflowSaveName.value = lastName;
   if (workflowSaveFeedback) workflowSaveFeedback.textContent = "";
   const draft = loadWorkflowScheduleDraft();
@@ -2703,7 +2738,7 @@ async function openWorkflowSaveModal() {
   workflowSaveModal.classList.add("is-open");
   const workflowId =
     workflowState.workflowId ||
-    Number(window.localStorage.getItem(WORKFLOW_ID_KEY));
+    Number(safeStorageGet(WORKFLOW_ID_KEY));
   if (workflowId) {
     fetchWorkflowSchedule(workflowId).then((schedule) => {
       if (!schedule) return;
@@ -3075,6 +3110,63 @@ function setNodeOutputItem(node, item) {
 
 function getNodeOutputItem(node) {
   return node?.output?.data?.item;
+}
+
+function isPrimitiveValue(value) {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function getTemplateContextForNode(node) {
+  const upstream = getUpstreamNode(node);
+  if (!upstream) return null;
+  const item = getNodeOutputItem(upstream);
+  if (Array.isArray(item)) {
+    const first = item[0];
+    if (isPrimitiveValue(first)) {
+      return { value: first };
+    }
+    return first && typeof first === "object" ? first : null;
+  }
+  if (isPrimitiveValue(item)) {
+    return { value: item };
+  }
+  return item && typeof item === "object" ? item : null;
+}
+
+function interpolateTemplateString(template, context) {
+  if (!template) return { text: "", missing: [] };
+  const missing = new Set();
+  const text = String(template).replace(
+    /\{\{\s*([^}]+?)\s*\}\}/g,
+    (_match, path) => {
+      const clean = String(path || "").trim();
+      if (!clean) {
+        missing.add("{{}}");
+        return "";
+      }
+      if (!context || typeof context !== "object") {
+        missing.add(clean);
+        return "";
+      }
+      const value = getValueByPath(context, clean);
+      if (value === undefined || value === null) {
+        missing.add(clean);
+        return "";
+      }
+      if (!isPrimitiveValue(value)) {
+        missing.add(clean);
+        return "";
+      }
+      return String(value);
+    }
+  );
+  return { text, missing: Array.from(missing) };
 }
 
 function setNodeExecutionStatus(node, status) {
@@ -3695,6 +3787,10 @@ async function executeXoneDataNode(node) {
     return result;
   }
 
+  const templateContext = getTemplateContextForNode(node);
+  const filterTemplate = node.config?.filters || "";
+  const filterResult = interpolateTemplateString(filterTemplate, templateContext);
+
   const payload = {
     endpoint,
     checkpointEnabled: node.config?.checkpointEnabled !== "no",
@@ -3702,9 +3798,33 @@ async function executeXoneDataNode(node) {
     checkpointOperator: String(node.config?.checkpointOperator || "").trim() || "gt",
     limit: normalizeNumber(node.config?.limit),
     timeoutSeconds,
+    filters: filterResult.text || "",
   };
+  if (payload.checkpointEnabled) {
+    const checkpointValue = String(node.config?.checkpointValue || "").trim();
+    if (checkpointValue) {
+      payload.checkpointValue = checkpointValue;
+    }
+    if (node.config?.checkpointOverride === true) {
+      payload.checkpointOverride = true;
+    }
+  }
 
   try {
+    if (filterResult.missing.length) {
+      const missingLabels = filterResult.missing.map((item) =>
+        item.startsWith("{{") ? item : `{{${item}}}`
+      );
+      result.warning =
+        "Variaveis nao encontradas no filtro: " +
+        missingLabels.join(", ") +
+        ".";
+      setWorkflowStatus(
+        "Algumas variaveis do filtro nao foram encontradas e foram enviadas vazias.",
+        "warning",
+        { duration: 4500 }
+      );
+    }
     const response = await apiFetch("/api/xone-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3732,6 +3852,9 @@ async function executeXoneDataNode(node) {
       setNodeExecutionStatus(node, "error");
     } else {
       setNodeExecutionStatus(node, "success");
+      if (node.config?.checkpointOverride) {
+        node.config.checkpointOverride = false;
+      }
     }
   } catch (err) {
     const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
@@ -4382,7 +4505,9 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         }
       }
       const label = document.createElement("label");
-      label.textContent = field.label;
+      if (field.type !== "link") {
+        label.textContent = field.label;
+      }
 
       let input = null;
       if (field.type === "conditions") {
@@ -4470,6 +4595,13 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
         wrapper.append(list, addBtn);
         input = wrapper;
+      } else if (field.type === "link") {
+        input = document.createElement("a");
+        input.href = field.href || "#";
+        input.target = "_blank";
+        input.rel = "noreferrer";
+        input.textContent = field.label || "Abrir";
+        input.className = "help-link";
       } else if (field.type === "select") {
         input = document.createElement("select");
         (field.options || []).forEach((option) => {
@@ -4527,19 +4659,23 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           input.value = node.config?.[field.key] ?? "";
           if (node.type === "xone-data" && field.key === "checkpointValue") {
             const endpointValue = String(node.config?.endpoint || "").trim();
+            const manualOverride = node.config?.checkpointOverride === true;
             const fallback = getTodayIsoDate();
             if (!input.value) {
               input.value = node.config?.checkpointValue || fallback;
               node.config.checkpointValue = input.value;
             }
             input.placeholder = fallback;
-            if (endpointValue) {
+            if (manualOverride) {
+              input.dataset.touched = "1";
+            } else if (endpointValue) {
               fetchXoneCheckpoint(endpointValue)
                 .then((checkpoint) => {
                   if (!checkpoint?.lastValue) return;
                   if (input.dataset.touched === "1") return;
                   input.value = checkpoint.lastValue;
                   node.config.checkpointValue = checkpoint.lastValue;
+                  node.config.checkpointOverride = false;
                   saveWorkflowState();
                   renderWorkflow();
                 })
@@ -4593,10 +4729,16 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           }
           node.config[field.key] = event.target.value;
           if (node.type === "xone-data" && field.key === "endpoint") {
-            xoneCheckpointCache.delete(event.target.value.trim());
+            const nextEndpoint = String(event.target.value || "").trim();
+            xoneCheckpointCache.delete(nextEndpoint);
+            node.config.checkpointOverride = false;
+            node.config.checkpointValue = "";
           }
           if (node.type === "xone-data" && field.key === "checkpointValue") {
             input.dataset.touched = "1";
+            node.config.checkpointOverride = Boolean(
+              String(event.target.value || "").trim()
+            );
           }
           saveWorkflowState();
           renderWorkflow();
@@ -4876,8 +5018,8 @@ function initializeWorkflow() {
       workflowState.selectedNodeId = null;
       workflowState.connectingFrom = null;
       workflowState.workflowId = null;
-      window.localStorage.removeItem(WORKFLOW_ID_KEY);
-      window.localStorage.removeItem(WORKFLOW_NAME_KEY);
+      safeStorageRemove(WORKFLOW_ID_KEY);
+      safeStorageRemove(WORKFLOW_NAME_KEY);
       saveWorkflowScheduleDraft(null);
       saveWorkflowState();
       renderWorkflow();
@@ -6684,7 +6826,7 @@ function openJsonModalWithData(title, data) {
   openModal(title, JSON.stringify(data, null, 2));
 }
 
-function handleControlAction(action, group) {
+async function handleControlAction(action, group) {
   if (!group) return;
   const targetType = group.targetType;
   const targetValue = group.targetValue;
@@ -6735,13 +6877,18 @@ function handleControlAction(action, group) {
       }
       break;
     case "delete": {
-      const scheduleId = representativeSchedule?.id;
-      if (!scheduleId) break;
-      const confirmDelete = window.confirm(
-        "Deseja excluir a regra mais recente deste alvo?"
-      );
-      if (!confirmDelete) break;
-      deleteSchedule(scheduleId);
+      const scheduleIds = (group.schedules || [])
+        .map((schedule) => schedule?.id)
+        .filter(Boolean);
+      if (!scheduleIds.length) break;
+      const targetLabel = TARGET_LABEL[targetType] || "Alvo";
+      const confirmed = await openConfirmModal({
+        title: "Excluir agendamentos",
+        message: `Todos os agendamentos de ${targetLabel}: ${targetValue} serao excluidos. Deseja continuar?`,
+        confirmText: "Excluir",
+      });
+      if (!confirmed) break;
+      await deleteSchedulesBulk(scheduleIds);
       break;
     }
     default:
@@ -7142,6 +7289,42 @@ async function deleteSchedule(id) {
   }
 }
 
+async function deleteSchedulesBulk(ids) {
+  const uniqueIds = Array.from(new Set(ids)).filter(Boolean);
+  if (!uniqueIds.length) return;
+  let failed = 0;
+  for (const id of uniqueIds) {
+    try {
+      const response = await apiFetch(`/api/schedules/${id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) {
+        const message = data?.error || "Erro ao excluir";
+        throw new Error(message);
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
+  if (rulesList) {
+    await loadSchedules();
+  }
+  if (views.control?.classList.contains("is-active")) {
+    await loadControl();
+  }
+  if (failed > 0) {
+    const targetFeedback =
+      views.control?.classList.contains("is-active") && controlFeedback
+        ? controlFeedback
+        : rulesFeedback;
+    if (targetFeedback) {
+      targetFeedback.textContent =
+        "Alguns agendamentos nao puderam ser excluidos.";
+      targetFeedback.classList.add("is-error");
+    }
+  }
+}
+
 async function deleteWorkflow(id) {
   try {
     const response = await apiFetch(`/api/workflows/${id}`, { method: "DELETE" });
@@ -7158,8 +7341,8 @@ async function deleteWorkflow(id) {
     }
     if (workflowState.workflowId === Number(id)) {
       workflowState.workflowId = null;
-      window.localStorage.removeItem(WORKFLOW_ID_KEY);
-      window.localStorage.removeItem(WORKFLOW_NAME_KEY);
+      safeStorageRemove(WORKFLOW_ID_KEY);
+      safeStorageRemove(WORKFLOW_NAME_KEY);
       saveWorkflowScheduleDraft(null);
       updateWorkflowTitle();
     }

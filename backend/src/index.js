@@ -2392,6 +2392,7 @@ app.post("/api/xone-data", async (req, res) => {
     normalizeText(req.body?.checkpointField) || "created_date_local";
   const operator =
     (normalizeText(req.body?.checkpointOperator) || "gt").toLowerCase();
+  const checkpointOverride = normalizeBoolean(req.body?.checkpointOverride, false);
   if (!["gt", "gte"].includes(operator)) {
     res.status(400).json({ error: "Operador invalido (gt ou gte)" });
     return;
@@ -2400,13 +2401,21 @@ app.post("/api/xone-data", async (req, res) => {
   const timeoutSeconds = normalizeNumber(req.body?.timeoutSeconds) || 60;
   const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
 
-  let queryParams = {};
+  const filterParams = parseKeyValueLines(req.body?.filters);
+  let queryParams = { ...filterParams };
   if (checkpointEnabled) {
-    const lastValue = await getXoneCheckpoint(endpoint);
     const fallbackValue = normalizeText(req.body?.checkpointValue);
-    const resolvedValue = lastValue || fallbackValue || null;
+    const lastValue = await getXoneCheckpoint(endpoint);
+    let resolvedValue = null;
+    if (checkpointOverride && fallbackValue) {
+      resolvedValue = fallbackValue;
+      await upsertXoneCheckpoint(endpoint, checkpointField, operator, fallbackValue);
+    } else {
+      resolvedValue = lastValue || fallbackValue || null;
+    }
     if (resolvedValue) {
       queryParams = {
+        ...queryParams,
         [checkpointField]: `${operator}.${resolvedValue}`,
         order: `${checkpointField}.asc`,
       };

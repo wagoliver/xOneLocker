@@ -1051,7 +1051,7 @@ textarea::placeholder {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   max-width: calc(100% - 32px);
   padding: 8px 12px;
@@ -1060,6 +1060,94 @@ textarea::placeholder {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   pointer-events: auto;
+}
+
+.workflow-controls .control-btn,
+.workflow-controls .control-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 400;
+}
+
+.workflow-controls .control-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+}
+
+.workflow-controls .control-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.workflow-controls .control-run {
+  height: 44px;
+  padding: 10px 18px;
+  gap: 10px;
+}
+
+.control-icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.control-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.control-label {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.control-separator {
+  width: 1px;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+}
+
+.zoom-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  height: 40px;
+}
+
+.zoom-pill .ghost {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 12px;
+  height: 40px;
+  border-radius: 0;
+}
+
+.zoom-pill .zoom-btn {
+  width: 40px;
+  display: grid;
+  place-items: center;
+}
+
+.zoom-pill .zoom-label {
+  font-weight: 400;
+  min-width: 64px;
+}
+
+.zoom-icon {
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .palette-header h3,
@@ -2115,6 +2203,19 @@ textarea::placeholder {
 .inspector-form textarea {
   min-height: 72px;
   resize: vertical;
+}
+
+.help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #93c5fd;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.help-link:hover {
+  text-decoration: underline;
 }
 
 .conditions-editor {
