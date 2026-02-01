@@ -104,6 +104,7 @@ const workflowPaletteToggle = document.getElementById("workflow-palette-toggle")
 const workflowInspectorPanel = document.querySelector(".workflow-inspector");
 const workflowMenu = document.getElementById("workflow-menu");
 const workflowEdgeMenu = document.getElementById("workflow-edge-menu");
+const workflowScheduleMenu = document.getElementById("workflow-schedule-menu");
 const workflowModal = document.getElementById("workflow-modal");
 const workflowModalBody = document.getElementById("workflow-modal-body");
 const workflowModalClose = document.getElementById("workflow-modal-close");
@@ -136,6 +137,7 @@ const workflowSaveCron = document.getElementById("workflow-save-cron");
 const workflowSaveTimezone = document.getElementById("workflow-save-timezone");
 const workflowSaveSchedule = document.querySelector(".workflow-save-schedule");
 const workflowStatus = document.getElementById("workflow-status");
+const workflowTitle = document.getElementById("workflow-title");
 const workflowClearButton = document.getElementById("workflow-clear");
 const workflowSaveButton = document.getElementById("workflow-save");
 const workflowRunButton = document.getElementById("workflow-run");
@@ -195,6 +197,7 @@ let workflowEdgesRaf = null;
 let workflowConnectingHoverPort = null;
 let workflowMenuNodeId = null;
 let workflowMenuEdge = null;
+let workflowScheduleMenuWorkflowId = null;
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowTableNodeId = null;
@@ -649,6 +652,38 @@ const WORKFLOW_BRICKS = [
     ],
   },
   {
+    type: "xone-collaborators",
+    title: "Get xOne Collaborators",
+    subtitle: "Busca colaboradores no xOne",
+    group: "Integracao",
+    summary: () => "GET register-api.xonecloud.com - Bearer",
+    fixedConfig: {
+      method: "GET",
+      url: "https://register-api.xonecloud.com/collaborators/api/v1",
+      authType: "bearer",
+      headers: "accept: application/json",
+      bodyType: "none",
+      queryParams: "",
+      responsePath: "",
+    },
+    fields: [
+      {
+        key: "authToken",
+        label: "Bearer token",
+        type: "text",
+        placeholder: "Cole o token",
+        excludeFromSummary: true,
+      },
+      {
+        key: "timeoutSeconds",
+        label: "Timeout (segundos)",
+        type: "number",
+        placeholder: "60",
+        default: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS),
+      },
+    ],
+  },
+  {
     type: "webhook",
     title: "Webhook HTTP",
     subtitle: "GET/POST/DELETE para integracoes",
@@ -803,18 +838,52 @@ const WORKFLOW_BRICKS = [
 ];
 
 const WORKFLOW_BRICK_TYPES = new Set(WORKFLOW_BRICKS.map((brick) => brick.type));
+let workflowStatusTimeout = null;
 
 function getWorkflowBrick(type) {
   return WORKFLOW_BRICKS.find((brick) => brick.type === type);
 }
 
-function setWorkflowStatus(message, tone) {
+function applyFixedConfig(node, defOverride) {
+  if (!node) return;
+  const def = defOverride || getWorkflowBrick(node.type);
+  if (!def?.fixedConfig) return;
+  if (!node.config) node.config = {};
+  Object.entries(def.fixedConfig).forEach(([key, value]) => {
+    node.config[key] = value;
+  });
+}
+
+function setWorkflowStatus(message, tone, options = {}) {
   if (!workflowStatus) return;
+  if (workflowStatusTimeout) {
+    clearTimeout(workflowStatusTimeout);
+    workflowStatusTimeout = null;
+  }
   workflowStatus.textContent = message || "";
   workflowStatus.className = "feedback";
   if (tone === "error") workflowStatus.classList.add("is-error");
   if (tone === "success") workflowStatus.classList.add("is-success");
   if (tone === "warning") workflowStatus.classList.add("is-warning");
+  const shouldAutoHide =
+    options.autoHide !== undefined ? options.autoHide : Boolean(message);
+  if (shouldAutoHide && message) {
+    const duration =
+      typeof options.duration === "number" ? options.duration : 4000;
+    workflowStatusTimeout = window.setTimeout(() => {
+      workflowStatus.textContent = "";
+      workflowStatus.className = "feedback";
+      workflowStatusTimeout = null;
+    }, Math.max(1500, duration));
+  }
+}
+
+function updateWorkflowTitle(nameOverride) {
+  if (!workflowTitle) return;
+  const stored = nameOverride ?? window.localStorage.getItem(WORKFLOW_NAME_KEY);
+  const title = stored && String(stored).trim() ? String(stored).trim() : "Fluxo sem nome";
+  workflowTitle.textContent = title;
+  workflowTitle.title = title;
 }
 
 function snapToGrid(value) {
@@ -900,13 +969,15 @@ function loadWorkflowState() {
           const hasPosition =
             typeof node?.position?.x === "number" &&
             typeof node?.position?.y === "number";
-          return {
+          const nextNode = {
             ...node,
             config: node?.config || {},
             position: hasPosition
               ? node.position
               : { x: 40 + index * 24, y: 40 + index * 24 },
           };
+          applyFixedConfig(nextNode);
+          return nextNode;
         });
     }
     if (Array.isArray(parsed?.edges)) {
@@ -1066,6 +1137,7 @@ async function saveWorkflowToServer(name) {
     }
 
     window.localStorage.setItem(WORKFLOW_NAME_KEY, trimmed);
+    updateWorkflowTitle(trimmed);
     if (workflowSaveFeedback) {
       workflowSaveFeedback.textContent = schedulePayload
         ? "Fluxo e agendamento salvos."
@@ -1102,13 +1174,15 @@ function applyWorkflowDefinition(definition, name, workflowId) {
       const hasPosition =
         typeof node?.position?.x === "number" &&
         typeof node?.position?.y === "number";
-      return {
+      const nextNode = {
         ...node,
         config: node?.config || {},
         position: hasPosition
           ? node.position
           : { x: 40 + index * 24, y: 40 + index * 24 },
       };
+      applyFixedConfig(nextNode);
+      return nextNode;
     });
 
   const validIds = new Set(workflowState.nodes.map((node) => node.id));
@@ -1138,6 +1212,7 @@ function applyWorkflowDefinition(definition, name, workflowId) {
     name ? `Fluxo "${name}" carregado.` : "Fluxo carregado.",
     "success"
   );
+  updateWorkflowTitle(name);
   closeWorkflowLoadModal();
 }
 
@@ -1167,10 +1242,7 @@ function getBrickIconSvg(type) {
       `;
     case "block":
       return `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"></circle>
-          <path d="M8 16l8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-        </svg>
+        <img src="icons/xone-icon-x-square.svg" alt="" />
       `;
     case "webhook":
       return `
@@ -1179,6 +1251,21 @@ function getBrickIconSvg(type) {
           <path d="M17 7h-4l-2-3 2-3h4l2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           <path d="M17 17h-4l-2 3 2 3h4l2-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
         </svg>
+      `;
+    case "flow":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="5" cy="12" r="2" fill="currentColor"></circle>
+          <circle cx="19" cy="6" r="2" fill="currentColor"></circle>
+          <circle cx="19" cy="18" r="2" fill="currentColor"></circle>
+          <path d="M7 12h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          <path d="M13 12l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          <path d="M13 12l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+      `;
+    case "xone-collaborators":
+      return `
+        <img src="icons/xone-icon-x-square.svg" alt="" />
       `;
     case "table":
       return `
@@ -1250,12 +1337,13 @@ function renderWorkflowSchedules() {
 
       const icon = document.createElement("span");
       icon.className = "schedule-icon";
-      icon.innerHTML = getBrickIconSvg("block");
+      icon.innerHTML = getBrickIconSvg("flow");
 
       const info = document.createElement("div");
       info.className = "schedule-info";
 
       const title = document.createElement("h4");
+      title.className = "schedule-title";
       title.textContent = schedule.workflow_name || "Agendamento";
 
       const subtitle = document.createElement("p");
@@ -1264,18 +1352,22 @@ function renderWorkflowSchedules() {
         ? `Ultima execucao: ${formatWorkflowDate(schedule.last_run_at)}`
         : "Ultima execucao: Nunca";
 
-      info.append(title, subtitle);
+      info.append(subtitle);
 
       const statusInfo = getScheduleStatusLabel(schedule);
-    const status = document.createElement("span");
-    status.className = "schedule-status";
-    if (statusInfo.tone === "ok") status.classList.add("is-ok");
-    if (statusInfo.tone === "error") status.classList.add("is-error");
-    if (statusInfo.tone === "running") status.classList.add("is-running");
-    if (statusInfo.tone === "warning") status.classList.add("is-warning");
-    status.textContent = statusInfo.label;
+      const status = document.createElement("span");
+      status.className = "schedule-status";
+      if (statusInfo.tone === "ok") status.classList.add("is-ok");
+      if (statusInfo.tone === "error") status.classList.add("is-error");
+      if (statusInfo.tone === "running") status.classList.add("is-running");
+      if (statusInfo.tone === "warning") status.classList.add("is-warning");
+      status.textContent = statusInfo.label;
 
-      card.append(grip, icon, info, status);
+      const meta = document.createElement("div");
+      meta.className = "schedule-meta";
+      meta.append(status);
+
+      card.append(title, grip, icon, info, meta);
       workflowSchedulesList.append(card);
     });
   };
@@ -1304,6 +1396,35 @@ async function fetchWorkflowSchedules() {
   } catch (err) {
     workflowSchedulesList.textContent =
       err?.message || "Falha ao carregar agendamentos.";
+  }
+}
+
+async function deleteWorkflowSchedule(workflowId) {
+  if (!workflowId) return;
+  try {
+    const response = await apiFetch(`/api/workflows/${workflowId}/schedule`, {
+      method: "DELETE",
+    });
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    if (!response.ok) {
+      const message = data?.error || text || "Falha ao remover agendamento.";
+      throw new Error(message);
+    }
+    if (workflowPaletteTab === "schedules") {
+      await fetchWorkflowSchedules();
+    }
+    if (workflowState.workflowId === workflowId) {
+      saveWorkflowScheduleDraft(null);
+    }
+    setWorkflowStatus("Agendamento removido.", "success");
+  } catch (err) {
+    setWorkflowStatus(err?.message || "Falha ao remover agendamento.", "error");
   }
 }
 
@@ -1355,7 +1476,7 @@ function renderWorkflowList(items) {
       <th>Nome</th>
       <th>Atualizado</th>
       <th>Criado por</th>
-      <th></th>
+      <th>Acoes</th>
     </tr>
   `;
   const tbody = document.createElement("tbody");
@@ -1363,11 +1484,15 @@ function renderWorkflowList(items) {
   items.forEach((item) => {
     const row = document.createElement("tr");
     const createdBy = item.created_by || "-";
+    row.dataset.workflowId = item.id;
     row.innerHTML = `
       <td>${item.name}</td>
       <td>${formatWorkflowDate(item.updated_at)}</td>
       <td>${createdBy}</td>
-      <td><button class="ghost" data-action="load" data-id="${item.id}">Carregar</button></td>
+      <td>
+        <button class="ghost" data-action="load" data-id="${item.id}">Abrir</button>
+        <button class="ghost is-danger" data-action="delete" data-id="${item.id}">Excluir</button>
+      </td>
     `;
     tbody.appendChild(row);
   });
@@ -1406,7 +1531,7 @@ async function loadWorkflowFromServer(id) {
   const workflowId = Number(id);
   if (!workflowId) return;
   if (workflowLoadFeedback) {
-    workflowLoadFeedback.textContent = "Carregando fluxo...";
+      workflowLoadFeedback.textContent = "Abrindo fluxo...";
     workflowLoadFeedback.className = "feedback";
   }
   try {
@@ -1482,6 +1607,7 @@ function createWorkflowNode(type, position) {
       }
     });
   }
+  applyFixedConfig(node, def);
   workflowState.nodes.push(node);
   workflowState.selectedNodeId = node.id;
   workflowState.connectingFrom = null;
@@ -2118,7 +2244,8 @@ function openWorkflowMenu(x, y, nodeId) {
     '.context-item[data-action="remove-links"]'
   );
   const isStart = node?.type === "start";
-  const isWebhook = node?.type === "webhook";
+  const isWebhook =
+    node?.type === "webhook" || node?.type === "xone-collaborators";
   const isBlock = node?.type === "block";
   const isTable = node?.type === "table";
   const canViewResponse = isWebhook || isBlock;
@@ -2170,6 +2297,44 @@ function closeWorkflowMenu() {
   if (!workflowMenu) return;
   workflowMenu.classList.remove("is-open");
   workflowMenuNodeId = null;
+}
+
+function openWorkflowScheduleMenu(x, y, workflowId, hasSchedule) {
+  if (!workflowScheduleMenu) return;
+  workflowScheduleMenuWorkflowId = workflowId;
+  workflowScheduleMenu.dataset.workflowId = workflowId;
+  const deleteItem = workflowScheduleMenu.querySelector(
+    '[data-action="delete-schedule"]'
+  );
+  if (deleteItem) {
+    deleteItem.classList.toggle("is-disabled", !hasSchedule);
+  }
+
+  workflowScheduleMenu.classList.add("is-open");
+  workflowScheduleMenu.style.left = `${x}px`;
+  workflowScheduleMenu.style.top = `${y}px`;
+
+  const padding = 8;
+  const rect = workflowScheduleMenu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+
+  if (rect.right > window.innerWidth - padding) {
+    left = window.innerWidth - rect.width - padding;
+  }
+  if (rect.bottom > window.innerHeight - padding) {
+    top = window.innerHeight - rect.height - padding;
+  }
+
+  workflowScheduleMenu.style.left = `${Math.max(padding, left)}px`;
+  workflowScheduleMenu.style.top = `${Math.max(padding, top)}px`;
+}
+
+function closeWorkflowScheduleMenu() {
+  if (!workflowScheduleMenu) return;
+  workflowScheduleMenu.classList.remove("is-open");
+  workflowScheduleMenuWorkflowId = null;
+  delete workflowScheduleMenu.dataset.workflowId;
 }
 
 function openWorkflowEdgeMenu(x, y, edge) {
@@ -2727,7 +2892,7 @@ async function executeWorkflowFromStart(startNode) {
     let hasWarning = false;
 
     for (const node of order) {
-      if (node.type === "webhook") {
+      if (node.type === "webhook" || node.type === "xone-collaborators") {
         const result = await executeWebhookNode(node);
         if (node.execStatus === "warning") {
           hasWarning = true;
@@ -3169,6 +3334,7 @@ async function executeBlockNode(node) {
 }
 
 async function executeWebhookNode(node) {
+  applyFixedConfig(node);
   const start = performance.now();
   const timeoutSeconds = normalizeTimeoutSeconds(node.config?.timeoutSeconds);
   const result = {
@@ -3539,9 +3705,9 @@ function renderWorkflow() {
       const avatar = document.createElement("div");
       avatar.className = "block-avatar";
       const icon = document.createElement("img");
-      icon.src =
-        actionType === 1 ? "icons/monitor-unlocked.svg" : "icons/monitor-locked.svg";
+      icon.src = "icons/xone-icon-x-square.svg";
       icon.alt = "";
+      icon.className = "is-xone";
       avatar.append(icon);
 
       const main = document.createElement("div");
@@ -4090,6 +4256,7 @@ function initializeWorkflow() {
   renderWorkflowPalette();
   setWorkflowPaletteTab("bricks");
   loadWorkflowState();
+  updateWorkflowTitle();
   renderWorkflow();
   renderWorkflowInspectorPanel();
   applyWorkflowViewport();
@@ -4262,9 +4429,10 @@ function initializeWorkflow() {
   if (workflowClearButton) {
     workflowClearButton.addEventListener("click", async () => {
       const confirmed = await openConfirmModal({
-        title: "Limpar fluxo",
-        message: "Deseja apagar todos os blocos e conexoes?",
-        confirmText: "Limpar",
+        title: "Novo fluxo",
+        message:
+          "Antes de abrir um novo fluxo, salve suas alteracoes atuais. Se continuar, todas as configuracoes e interacoes nao salvas serao perdidas.",
+        confirmText: "Abrir novo",
       });
       if (!confirmed) return;
       workflowState.nodes = [];
@@ -4273,10 +4441,12 @@ function initializeWorkflow() {
       workflowState.connectingFrom = null;
       workflowState.workflowId = null;
       window.localStorage.removeItem(WORKFLOW_ID_KEY);
+      window.localStorage.removeItem(WORKFLOW_NAME_KEY);
       saveWorkflowScheduleDraft(null);
       saveWorkflowState();
       renderWorkflow();
       renderWorkflowInspectorPanel();
+      updateWorkflowTitle();
       setWorkflowStatus("Fluxo limpo.", "success");
     });
   }
@@ -4343,6 +4513,19 @@ function initializeWorkflow() {
       if (!workflowId) return;
       loadWorkflowFromServer(workflowId);
     });
+    workflowSchedulesList.addEventListener("contextmenu", async (event) => {
+      const card = event.target.closest(".schedule-card");
+      if (!card) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const workflowId = Number(card.dataset.workflowId);
+      if (!workflowId) return;
+      const schedule = workflowSchedulesCache.find(
+        (item) => Number(item.workflow_id) === workflowId
+      );
+      const hasSchedule = Boolean(schedule?.has_schedule || schedule?.schedule_id);
+      openWorkflowScheduleMenu(event.clientX, event.clientY, workflowId, hasSchedule);
+    });
     workflowSchedulesList.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       const card = event.target.closest(".schedule-card");
@@ -4406,6 +4589,39 @@ function initializeWorkflow() {
     });
   }
 
+  if (workflowScheduleMenu) {
+    workflowScheduleMenu.addEventListener("click", async (event) => {
+      const action = event.target.closest("[data-action]")?.dataset?.action;
+      if (!action) return;
+      const workflowId =
+        Number(workflowScheduleMenu.dataset.workflowId) ||
+        workflowScheduleMenuWorkflowId;
+      if (!workflowId) return;
+      if (action === "delete-schedule") {
+        const confirmed = await openConfirmModal({
+          title: "Confirmar exclusao",
+          message: "Deseja remover o agendamento deste fluxo?",
+          confirmText: "Excluir",
+        });
+        if (!confirmed) return;
+        await deleteWorkflowSchedule(workflowId);
+      }
+      if (action === "stats") {
+        setWorkflowStatus(
+          "Estatistica em breve.",
+          "warning",
+          { duration: 2500 }
+        );
+      }
+      closeWorkflowScheduleMenu();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (workflowScheduleMenu.contains(event.target)) return;
+      closeWorkflowScheduleMenu();
+    });
+  }
+
   if (workflowEdgeMenu) {
     workflowEdgeMenu.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]")?.dataset?.action;
@@ -4423,9 +4639,39 @@ function initializeWorkflow() {
 
   if (workflowLoadBody) {
     workflowLoadBody.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-action='load']");
+      const button = event.target.closest("[data-action]");
       if (!button) return;
-      loadWorkflowFromServer(button.dataset.id);
+      const action = button.dataset.action;
+      if (action === "load") {
+        loadWorkflowFromServer(button.dataset.id);
+        return;
+      }
+      if (action === "delete") {
+        const workflowId = Number(button.dataset.id);
+        if (!workflowId) return;
+        openConfirmModal({
+          title: "Confirmar exclusao",
+          message: "Deseja excluir este fluxo? Isso remove o agendamento e as execucoes.",
+          confirmText: "Excluir",
+        }).then((confirmed) => {
+          if (!confirmed) return;
+          deleteWorkflow(workflowId);
+        });
+      }
+    });
+    workflowLoadBody.addEventListener("contextmenu", async (event) => {
+      const row = event.target.closest("tr[data-workflow-id]");
+      if (!row) return;
+      event.preventDefault();
+      const workflowId = Number(row.dataset.workflowId);
+      if (!workflowId) return;
+      const confirmed = await openConfirmModal({
+        title: "Confirmar exclusao",
+        message: "Deseja excluir este fluxo? Isso remove o agendamento e as execucoes.",
+        confirmText: "Excluir",
+      });
+      if (!confirmed) return;
+      await deleteWorkflow(workflowId);
     });
   }
 
@@ -6456,6 +6702,45 @@ async function deleteSchedule(id) {
     if (targetFeedback) {
       targetFeedback.textContent = err.message || "Falha ao excluir a regra.";
       targetFeedback.classList.add("is-error");
+    }
+  }
+}
+
+async function deleteWorkflow(id) {
+  try {
+    const response = await apiFetch(`/api/workflows/${id}`, { method: "DELETE" });
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    if (!response.ok) {
+      const message = data?.error || text || "Erro ao excluir o fluxo.";
+      throw new Error(message);
+    }
+    if (workflowState.workflowId === Number(id)) {
+      workflowState.workflowId = null;
+      window.localStorage.removeItem(WORKFLOW_ID_KEY);
+      window.localStorage.removeItem(WORKFLOW_NAME_KEY);
+      saveWorkflowScheduleDraft(null);
+      updateWorkflowTitle();
+    }
+    if (workflowPaletteTab === "schedules") {
+      await fetchWorkflowSchedules();
+    }
+    await fetchWorkflowList();
+    if (workflowLoadFeedback) {
+      workflowLoadFeedback.textContent = "Fluxo removido.";
+      workflowLoadFeedback.className = "feedback is-success";
+    }
+    setWorkflowStatus("Fluxo removido.", "success");
+  } catch (err) {
+    if (workflowLoadFeedback) {
+      workflowLoadFeedback.textContent =
+        err?.message || "Falha ao excluir o fluxo.";
+      workflowLoadFeedback.className = "feedback is-error";
     }
   }
 }

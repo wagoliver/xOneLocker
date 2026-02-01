@@ -20,6 +20,11 @@ const {
   AUTH_USER = "admin",
   AUTH_PASSWORD = "admin",
   AUTH_TOKEN_TTL_HOURS = "24",
+  XONE_TOKEN_URL = "https://keycloak.xonecloud.com/realms/xone-cloud/protocol/openid-connect/token",
+  XONE_API_BASE = "https://api.xonecloud.com/",
+  XONE_CLIENT_ID,
+  XONE_CLIENT_SECRET,
+  XONE_SCOPE,
 } = process.env;
 
 const pool = new pg.Pool({
@@ -280,6 +285,15 @@ async function migrate() {
       finished_at TIMESTAMPTZ,
       result JSONB,
       error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS xone_checkpoints (
+      id SERIAL PRIMARY KEY,
+      endpoint TEXT UNIQUE NOT NULL,
+      field TEXT NOT NULL,
+      operator TEXT NOT NULL,
+      last_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     ALTER TABLE api_tokens
@@ -2098,6 +2112,36 @@ app.get("/api/workflows/:id", async (req, res) => {
     return;
   }
   res.json(result.rows[0]);
+});
+
+app.delete("/api/workflows/:id", async (req, res) => {
+  const id = normalizeNumber(req.params?.id);
+  if (!id) {
+    res.status(400).json({ error: "Id invalido" });
+    return;
+  }
+
+  const result = await pool.query(
+    "DELETE FROM locker_workflows WHERE id = $1 RETURNING *",
+    [id]
+  );
+  if (result.rowCount === 0) {
+    res.status(404).json({ error: "Fluxo nao encontrado" });
+    return;
+  }
+
+  await logAudit({
+    action: "WORKFLOW_DELETE",
+    entityType: "WORKFLOW",
+    entityId: id,
+    remoteId: null,
+    requestPayload: null,
+    responseStatus: 200,
+    responseBody: "Workflow removido",
+    error: null,
+  });
+
+  res.json({ ok: true });
 });
 
 app.get("/api/workflows/:id/schedule", async (req, res) => {

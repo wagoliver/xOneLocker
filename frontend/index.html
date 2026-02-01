@@ -184,9 +184,10 @@
               <svg id="workflow-edges" class="workflow-edges"></svg>
               <div id="workflow-nodes" class="workflow-nodes"></div>
               <div class="workflow-chrome">
+                <div id="workflow-title" class="workflow-title">Fluxo sem nome</div>
                 <div class="workflow-controls">
-                  <button id="workflow-clear" class="ghost">Limpar</button>
-                  <button id="workflow-load" class="ghost">Carregar</button>
+                  <button id="workflow-clear" class="ghost">Novo</button>
+                  <button id="workflow-load" class="ghost">Abrir</button>
                   <button id="workflow-save" class="ghost">Salvar</button>
                   <div class="zoom-controls">
                     <button id="workflow-zoom-out" class="ghost" type="button">-</button>
@@ -554,6 +555,15 @@
       </button>
     </div>
 
+    <div id="workflow-schedule-menu" class="context-menu">
+      <button type="button" class="context-item" data-action="stats">
+        Estatistica
+      </button>
+      <button type="button" class="context-item is-danger" data-action="delete-schedule">
+        Excluir
+      </button>
+    </div>
+
     <div id="workflow-modal" class="modal">
       <div class="modal-card">
         <div class="modal-header">
@@ -641,7 +651,7 @@
     <div id="workflow-load-modal" class="modal">
       <div class="modal-card">
         <div class="modal-header">
-          <h2>Carregar fluxo</h2>
+          <h2>Abrir fluxo</h2>
           <button id="workflow-load-close" class="ghost">Fechar</button>
         </div>
         <div id="workflow-load-body" class="table-card"></div>
