@@ -178,6 +178,7 @@ async function migrate() {
       end_time TEXT,
       target_type INTEGER NOT NULL,
       target_value TEXT NOT NULL,
+      source_label TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       last_api_called_at TIMESTAMPTZ,
@@ -192,6 +193,9 @@ async function migrate() {
       remote_created_at TIMESTAMPTZ,
       remote_updated_at TIMESTAMPTZ
     );
+
+    ALTER TABLE locker_schedules
+      ADD COLUMN IF NOT EXISTS source_label TEXT;
 
     CREATE TABLE IF NOT EXISTS locker_user_unlocks (
       id SERIAL PRIMARY KEY,
@@ -1551,6 +1555,7 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
       endTime: scheduleType === 1 ? endTime : null,
       targetType,
       targetValue: normalizedTarget,
+      sourceLabel: normalizeText(options?.sourceLabel),
     },
   };
 }
@@ -1591,7 +1596,17 @@ function buildBlockConfiguredItem(config, targetValue, options = {}) {
     timeSource: config?.timeSource || "manual",
     startTimePath: normalizeText(config?.startTimePath) || null,
     endTimePath: normalizeText(config?.endTimePath) || null,
+    sourceLabel: normalizeText(options?.sourceLabel) || null,
   };
+}
+
+function getWorkflowNodeLabel(node) {
+  if (!node) return null;
+  const named = normalizeText(node?.config?.name);
+  if (named) return named;
+  const title = normalizeText(node?.title);
+  if (title) return title;
+  return normalizeText(node?.type);
 }
 
 async function createScheduleFromPayload(payload) {
@@ -1618,6 +1633,7 @@ async function createScheduleFromPayload(payload) {
   const daysOfWeek = normalizeArray(payload?.daysOfWeek);
   const startTime = normalizeOptional(payload?.startTime);
   const endTime = normalizeOptional(payload?.endTime);
+  const sourceLabel = normalizeText(payload?.sourceLabel);
 
   const insert = await pool.query(
     `
@@ -1632,9 +1648,10 @@ async function createScheduleFromPayload(payload) {
         start_time,
         end_time,
         target_type,
-        target_value
+        target_value,
+        source_label
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *;
     `,
     [
@@ -1649,6 +1666,7 @@ async function createScheduleFromPayload(payload) {
       endTime,
       targetType,
       targetValue,
+      sourceLabel,
     ]
   );
 
@@ -1779,6 +1797,7 @@ async function executeWorkflowDefinition(definition) {
       const sourceId = getUpstreamNodeId(node.id, edges);
       const sourceMode = node.config?.sourceMode || "data";
       const timeSource = node.config?.timeSource || "manual";
+      const sourceLabel = getWorkflowNodeLabel(node);
       let targets = [];
 
       if (sourceMode === "manual") {
@@ -1818,7 +1837,10 @@ async function executeWorkflowDefinition(definition) {
                 endTime: getTimeValueFromEntry(entry, node.config?.endTimePath),
               }
             : {};
-        return buildBlockConfiguredItem(node.config || {}, target, timeOverrides);
+        return buildBlockConfiguredItem(node.config || {}, target, {
+          ...timeOverrides,
+          sourceLabel,
+        });
       });
 
       let failedCount = 0;
@@ -1835,7 +1857,7 @@ async function executeWorkflowDefinition(definition) {
         const { payload, error } = buildBlockSchedulePayload(
           node.config || {},
           target,
-          timeOverrides
+          { ...timeOverrides, sourceLabel }
         );
         if (error || !payload) {
           failedCount += 1;
@@ -3286,6 +3308,8 @@ app.post("/api/schedules", async (req, res) => {
   const daysOfWeek = normalizeArray(req.body.daysOfWeek);
   const startTime = normalizeOptional(req.body.startTime);
   const endTime = normalizeOptional(req.body.endTime);
+  const sourceLabel =
+    req.body.sourceLabel === undefined ? null : normalizeText(req.body.sourceLabel);
 
   const insert = await pool.query(
     `
@@ -3300,9 +3324,10 @@ app.post("/api/schedules", async (req, res) => {
         start_time,
         end_time,
         target_type,
-        target_value
+        target_value,
+        source_label
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *;
     `,
     [
@@ -3317,6 +3342,7 @@ app.post("/api/schedules", async (req, res) => {
       endTime,
       targetType,
       targetValue,
+      sourceLabel,
     ]
   );
 
@@ -3396,8 +3422,9 @@ app.put("/api/schedules/:id", async (req, res) => {
           end_time = $9,
           target_type = $10,
           target_value = $11,
+          source_label = COALESCE($12, source_label),
           updated_at = NOW()
-      WHERE id = $12
+      WHERE id = $13
       RETURNING *;
     `,
     [
@@ -3412,6 +3439,7 @@ app.put("/api/schedules/:id", async (req, res) => {
       endTime,
       targetType,
       targetValue,
+      sourceLabel,
       id,
     ]
   );

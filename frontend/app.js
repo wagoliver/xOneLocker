@@ -17,6 +17,7 @@ const syncRulesButton = document.getElementById("sync-rules-btn");
 const backToListButton = document.getElementById("back-to-list");
 const cancelRuleButton = document.getElementById("cancel-rule");
 const logoutButton = document.getElementById("logout-btn");
+const themeToggleButton = document.getElementById("theme-toggle");
 
 const rulesList = document.getElementById("rules-list");
 const rulesFeedback = document.getElementById("rules-feedback");
@@ -154,6 +155,49 @@ const workflowImportButton = document.getElementById("workflow-import");
 const workflowExportButton = document.getElementById("workflow-export");
 const workflowImportInput = document.getElementById("workflow-import-input");
 const workflowFullscreenButton = document.getElementById("workflow-fullscreen");
+
+const THEME_STORAGE_KEY = "locker-theme";
+const THEME_ATTRIBUTE = "data-theme";
+
+function applyTheme(theme) {
+  const normalized = theme === "light" ? "light" : "dark";
+  document.body.setAttribute(THEME_ATTRIBUTE, normalized);
+
+  if (!themeToggleButton) {
+    return;
+  }
+
+  const isLight = normalized === "light";
+  themeToggleButton.textContent = isLight ? "Tema escuro" : "Tema claro";
+  themeToggleButton.setAttribute("aria-pressed", isLight ? "true" : "false");
+}
+
+function initializeTheme() {
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const prefersLight =
+    window.matchMedia &&
+    window.matchMedia("(prefers-color-scheme: light)").matches;
+  const initialTheme =
+    storedTheme === "light" || storedTheme === "dark"
+      ? storedTheme
+      : prefersLight
+        ? "light"
+        : "dark";
+
+  applyTheme(initialTheme);
+
+  if (!themeToggleButton) {
+    return;
+  }
+
+  themeToggleButton.addEventListener("click", () => {
+    const current =
+      document.body.getAttribute(THEME_ATTRIBUTE) === "light" ? "light" : "dark";
+    const next = current === "light" ? "dark" : "light";
+    applyTheme(next);
+    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+  });
+}
 
 let editingId = null;
 const scheduleCache = new Map();
@@ -2487,6 +2531,7 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
       endTime: scheduleType === 1 ? endTime : null,
       targetType,
       targetValue: normalizedTarget,
+      sourceLabel: normalizeText(options?.sourceLabel),
     },
   };
 }
@@ -2527,6 +2572,7 @@ function buildBlockConfiguredItem(config, targetValue, options = {}) {
     timeSource: config?.timeSource || "manual",
     startTimePath: normalizeText(config?.startTimePath) || null,
     endTimePath: normalizeText(config?.endTimePath) || null,
+    sourceLabel: normalizeText(options?.sourceLabel) || null,
   };
 }
 
@@ -3993,6 +4039,7 @@ async function executeBlockNode(node) {
   const source = getUpstreamNode(node);
   const sourceMode = node.config?.sourceMode || "data";
   const timeSource = node.config?.timeSource || "manual";
+  const sourceLabel = getNodeDisplayName(node);
   let targets = [];
 
   if (sourceMode === "manual") {
@@ -4059,7 +4106,7 @@ async function executeBlockNode(node) {
   const validation = buildBlockSchedulePayload(
     node.config || {},
     validationTarget,
-    { skipTimeValidation: timeSource === "dynamic" }
+    { skipTimeValidation: timeSource === "dynamic", sourceLabel }
   );
   if (validation.error) {
     setWorkflowStatus(validation.error, "warning");
@@ -4078,7 +4125,10 @@ async function executeBlockNode(node) {
             endTime: getTimeValueFromEntry(entry, node.config?.endTimePath),
           }
         : {};
-    return buildBlockConfiguredItem(node.config || {}, target, timeOverrides);
+    return buildBlockConfiguredItem(node.config || {}, target, {
+      ...timeOverrides,
+      sourceLabel,
+    });
   });
   const responses = [];
   let successCount = 0;
@@ -4097,7 +4147,7 @@ async function executeBlockNode(node) {
     const { payload, error } = buildBlockSchedulePayload(
       node.config || {},
       target,
-      timeOverrides
+      { ...timeOverrides, sourceLabel }
     );
     if (error || !payload) {
       failedCount += 1;
@@ -6850,6 +6900,8 @@ function buildScheduleSummary(schedule) {
     schedule.start_time || schedule.end_time
       ? `${schedule.start_time || "-"} - ${schedule.end_time || "-"}`
       : "-";
+  const sourceLabel =
+    schedule.source_label || schedule.sourceLabel || "";
 
   return {
     actionLabel,
@@ -6859,6 +6911,7 @@ function buildScheduleSummary(schedule) {
     timeRange,
     startDate: formatDate(schedule.start_date),
     endDate: formatDate(schedule.end_date),
+    sourceLabel,
   };
 }
 
@@ -7232,6 +7285,9 @@ function buildControlItems(schedules) {
       TARGET_LABEL[group.targetType] || "",
       group.schedules.map((item) => item.remote_schedule_id || "").join(" "),
       group.schedules.map((item) => item.message || "").join(" "),
+      group.schedules
+        .map((item) => item.source_label || item.sourceLabel || "")
+        .join(" "),
     ]
       .join(" ")
       .toLowerCase();
@@ -7610,6 +7666,7 @@ function renderControlVisual(items) {
               <span>Recorrencia: ${escapeHtml(summary.recurrenceLabel)}</span>
               <span>Dias: ${escapeHtml(summary.days)}</span>
               <span>Horario: ${escapeHtml(summary.timeRange)}</span>
+              <span>Origem: ${escapeHtml(summary.sourceLabel || "-")}</span>
               <span class="control-schedule-spacer"></span>
               ${deleteButton}
             </div>
@@ -8472,6 +8529,7 @@ function buildPayloadFromSchedule(schedule) {
     endTime: schedule.end_time,
     targetType: schedule.target_type,
     targetValue: schedule.target_value,
+    sourceLabel: schedule.source_label || schedule.sourceLabel,
   };
 
   Object.keys(payload).forEach((key) => {
@@ -9275,5 +9333,6 @@ async function initializeApp() {
   await loadControl();
 }
 
+initializeTheme();
 initializeWorkflow();
 initializeApp();
