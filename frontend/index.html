@@ -18,26 +18,164 @@
     <div class="bg-accent"></div>
     <div class="noise-overlay"></div>
     <div class="app">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark brand-logo">
-            <img src="assets/logo-xonecloud-azul.svg" alt="XoneCloud" />
-          </div>
-          <div>
-            <div class="brand-title">Locker Rules</div>
-            <div class="brand-subtitle">MVP de regras e chamadas API</div>
+      <header class="app-shell">
+        <div class="app-header">
+          <div class="app-header-inner">
+            <div class="brand">
+              <div class="brand-mark brand-logo">
+                <img src="assets/logo-xonecloud-azul.svg" alt="XoneCloud" />
+              </div>
+              <div>
+                <div class="brand-title">Locker Rules</div>
+                <div class="brand-subtitle">MVP de regras e chamadas API</div>
+              </div>
+            </div>
+            <nav class="app-nav nav">
+              <button class="nav-btn is-active" data-view="control">Controle</button>
+              <button class="nav-btn" data-view="workflow">Workflow</button>
+              <button class="nav-btn" data-view="records">Registros API</button>
+              <button class="nav-btn" data-view="audit">Auditoria</button>
+              <button class="nav-btn admin-only" data-view="users">Usuarios</button>
+              <button class="nav-btn" data-view="token">Token API</button>
+            </nav>
+            <div class="app-header-right">
+              <button id="logout-btn" class="ghost">Sair</button>
+            </div>
           </div>
         </div>
-        <div class="nav-actions">
-          <nav class="nav">
-            <button class="nav-btn is-active" data-view="control">Controle</button>
-            <button class="nav-btn" data-view="workflow">Workflow</button>
-            <button class="nav-btn" data-view="records">Registros API</button>
-            <button class="nav-btn" data-view="audit">Auditoria</button>
-            <button class="nav-btn admin-only" data-view="users">Usuarios</button>
-            <button class="nav-btn" data-view="token">Token API</button>
-          </nav>
-          <button id="logout-btn" class="ghost">Sair</button>
+        <div class="page-header">
+          <div class="page-header-inner">
+            <div class="page-context is-active" data-context="control">
+              <div class="page-left">
+                <h1 class="page-title">Controle</h1>
+                <p class="page-subtitle">Visao por alvo com base nos agendamentos</p>
+              </div>
+              <div class="page-center">
+                <div class="control-tabs">
+                  <button class="control-tab is-active" data-control-tab="visual">
+                    Visual
+                  </button>
+                  <button class="control-tab" data-control-tab="table">Tabela</button>
+                </div>
+                <div class="control-search">
+                  <input
+                    id="control-search"
+                    type="search"
+                    aria-label="Buscar"
+                    placeholder="Buscar usuario, hostname ou ID API..."
+                  />
+                </div>
+                <div class="control-filter-group">
+                  <label class="control-filter">
+                    Tipo
+                    <select id="control-target-filter">
+                      <option value="all">Todos</option>
+                      <option value="user">User</option>
+                      <option value="hostname">Hostname</option>
+                    </select>
+                  </label>
+                  <label class="control-filter">
+                    Estado
+                    <select id="control-state-filter">
+                      <option value="all">Todos</option>
+                      <option value="locked">Bloqueado</option>
+                      <option value="unlocked">Desbloqueado</option>
+                      <option value="unknown">Indefinido</option>
+                      <option value="expired">Expirado</option>
+                    </select>
+                  </label>
+                  <label class="control-filter">
+                    Acao
+                    <select id="control-action-filter">
+                      <option value="all">Todas</option>
+                      <option value="lock">Lock</option>
+                      <option value="unlock">Unlock</option>
+                    </select>
+                  </label>
+                  <label class="control-filter">
+                    Ordenar
+                    <select id="control-order">
+                      <option value="next">Proxima acao</option>
+                      <option value="last">Ultima acao</option>
+                      <option value="status">Status API</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div class="page-right">
+                <button id="control-sync-btn" class="ghost">Sincronizar</button>
+                <button id="control-new-btn" class="primary">Novo</button>
+              </div>
+            </div>
+            <div class="page-context" data-context="workflow">
+              <div class="page-left">
+                <h1 class="page-title">Workflow</h1>
+                <p class="page-subtitle">Arraste blocos para montar o fluxo de bloqueio.</p>
+              </div>
+              <div class="page-center"></div>
+              <div class="page-right"></div>
+            </div>
+            <div class="page-context" data-context="ruleForm">
+              <div class="page-left">
+                <h1 id="form-title" class="page-title">Nova regra</h1>
+                <p class="page-subtitle">Campos alinhados com o cadastro de agendamentos</p>
+              </div>
+              <div class="page-center"></div>
+              <div class="page-right">
+                <button id="back-to-list" class="ghost">Voltar</button>
+              </div>
+            </div>
+            <div class="page-context" data-context="audit">
+              <div class="page-left">
+                <h1 class="page-title">Auditoria</h1>
+                <p class="page-subtitle">Registro das chamadas e acoes executadas</p>
+              </div>
+              <div class="page-center"></div>
+              <div class="page-right">
+                <button id="refresh-audit" class="ghost">Atualizar</button>
+              </div>
+            </div>
+            <div class="page-context" data-context="records">
+              <div class="page-left">
+                <h1 class="page-title">Registros na API</h1>
+                <p class="page-subtitle">Bloqueios, desbloqueios e condicoes cadastradas</p>
+              </div>
+              <div class="page-center">
+                <div class="segment">
+                  <button class="segment-btn is-active" data-record="schedules">
+                    Agendamentos (Lock/Unlock)
+                  </button>
+                  <button class="segment-btn" data-record="user-unlocks">
+                    Desbloqueio Usuario
+                  </button>
+                  <button class="segment-btn" data-record="hostname-unlocks">
+                    Desbloqueio Hostname
+                  </button>
+                </div>
+              </div>
+              <div class="page-right">
+                <button id="refresh-records" class="primary">Sincronizar</button>
+              </div>
+            </div>
+            <div class="page-context" data-context="users">
+              <div class="page-left">
+                <h1 class="page-title">Usuarios</h1>
+                <p class="page-subtitle">Aprovacao de contas pendentes</p>
+              </div>
+              <div class="page-center"></div>
+              <div class="page-right">
+                <button id="refresh-users" class="ghost">Atualizar</button>
+              </div>
+            </div>
+            <div class="page-context" data-context="token">
+              <div class="page-left">
+                <h1 class="page-title">Token para chamadas</h1>
+                <p class="page-subtitle">Use o Bearer token do Integration API</p>
+              </div>
+              <div class="page-center"></div>
+              <div class="page-right"></div>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -101,80 +239,12 @@
         </section>
 
         <section id="view-control" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Controle</h1>
-              <p class="muted">Visao por alvo com base nos agendamentos</p>
-            </div>
-            <div class="toolbar-actions">
-              <button id="control-sync-btn" class="ghost">Sincronizar</button>
-              <button id="control-new-btn" class="primary">Novo</button>
-            </div>
-          </div>
-
-          <div class="control-tabs">
-            <button class="control-tab is-active" data-control-tab="visual">Visual</button>
-            <button class="control-tab" data-control-tab="table">Tabela</button>
-          </div>
-
-          <div class="control-filters">
-            <div class="control-search">
-              <input
-                id="control-search"
-                type="search"
-                placeholder="Buscar usuario, hostname ou ID API..."
-              />
-            </div>
-            <div class="control-filter-group">
-              <label class="control-filter">
-                Tipo
-                <select id="control-target-filter">
-                  <option value="all">Todos</option>
-                  <option value="user">User</option>
-                  <option value="hostname">Hostname</option>
-                </select>
-              </label>
-              <label class="control-filter">
-                Estado
-                <select id="control-state-filter">
-                  <option value="all">Todos</option>
-                  <option value="locked">Bloqueado</option>
-                  <option value="unlocked">Desbloqueado</option>
-                  <option value="unknown">Indefinido</option>
-                  <option value="expired">Expirado</option>
-                </select>
-              </label>
-              <label class="control-filter">
-                Acao
-                <select id="control-action-filter">
-                  <option value="all">Todas</option>
-                  <option value="lock">Lock</option>
-                  <option value="unlock">Unlock</option>
-                </select>
-              </label>
-              <label class="control-filter">
-                Ordenar
-                <select id="control-order">
-                  <option value="next">Proxima acao</option>
-                  <option value="last">Ultima acao</option>
-                  <option value="status">Status API</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
           <div id="control-feedback" class="feedback"></div>
           <div id="control-visual" class="control-list"></div>
           <div id="control-table" class="table-card"></div>
         </section>
 
         <section id="view-workflow" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Workflow</h1>
-              <p class="muted">Arraste blocos para montar o fluxo de bloqueio.</p>
-            </div>
-          </div>
           <div id="workflow-status" class="feedback"></div>
           <div class="workflow-layout">
             <section id="workflow-canvas" class="workflow-canvas">
@@ -274,13 +344,6 @@
         </section>
 
         <section id="view-rule-form" class="view">
-          <div class="toolbar">
-            <div>
-              <h1 id="form-title">Nova regra</h1>
-              <p class="muted">Campos alinhados com o cadastro de agendamentos</p>
-            </div>
-            <button id="back-to-list" class="ghost">Voltar</button>
-          </div>
           <form id="rule-form" class="form-card">
             <div class="form-grid">
               <label>
@@ -386,12 +449,6 @@
         </section>
 
         <section id="view-token" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Token para chamadas</h1>
-              <p class="muted">Use o Bearer token do Integration API</p>
-            </div>
-          </div>
           <form id="token-form" class="form-card">
             <div class="form-grid">
               <label>
@@ -421,46 +478,16 @@
         </section>
 
         <section id="view-audit" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Auditoria</h1>
-              <p class="muted">Registro das chamadas e acoes executadas</p>
-            </div>
-            <button id="refresh-audit" class="ghost">Atualizar</button>
-          </div>
           <div id="audit-feedback" class="feedback"></div>
           <div id="audit-list" class="table-card"></div>
         </section>
 
         <section id="view-records" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Registros na API</h1>
-              <p class="muted">Bloqueios, desbloqueios e condicoes cadastradas</p>
-            </div>
-            <button id="refresh-records" class="primary">Sincronizar</button>
-          </div>
-          <div class="segment">
-            <button class="segment-btn is-active" data-record="schedules">
-              Agendamentos (Lock/Unlock)
-            </button>
-            <button class="segment-btn" data-record="user-unlocks">Desbloqueio Usuario</button>
-            <button class="segment-btn" data-record="hostname-unlocks">
-              Desbloqueio Hostname
-            </button>
-          </div>
           <div id="records-feedback" class="feedback"></div>
           <div id="records-list" class="table-card"></div>
         </section>
 
         <section id="view-users" class="view">
-          <div class="toolbar">
-            <div>
-              <h1>Usuarios</h1>
-              <p class="muted">Aprovacao de contas pendentes</p>
-            </div>
-            <button id="refresh-users" class="ghost">Atualizar</button>
-          </div>
           <div id="users-feedback" class="feedback"></div>
           <div id="users-list" class="table-card"></div>
         </section>

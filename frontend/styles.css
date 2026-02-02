@@ -58,28 +58,104 @@ body {
 .app {
   position: relative;
   z-index: 1;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 32px 24px 64px;
+  width: 100%;
+  margin: 0;
+  padding: 0 0 64px;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 18px 24px;
-  background: var(--card);
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  animation: fadeUp 0.6s ease;
+.app-shell {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  width: 100%;
 }
 
-.nav-actions {
+.app-header {
+  width: 100%;
+  background: #111111;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.app-header-inner {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 16px clamp(18px, 3vw, 48px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+}
+
+.app-header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.app-nav {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-header {
+  width: 100%;
+  background: #171717;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.page-header-inner {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 14px clamp(18px, 3vw, 48px) 16px;
+}
+
+.page-context {
+  display: none;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(320px, 2fr) minmax(200px, 0.8fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.page-context.is-active {
+  display: grid;
+}
+
+.page-left {
+  display: grid;
+  gap: 4px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  font-family: "Instrument Sans", "Manrope", sans-serif;
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.page-center {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr) minmax(320px, 1.6fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.page-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .brand {
@@ -135,17 +211,18 @@ body {
 .nav-btn {
   border: 1px solid transparent;
   background: transparent;
-  padding: 8px 16px;
-  border-radius: 999px;
+  padding: 6px 12px;
+  border-radius: 10px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 13px;
   color: var(--muted);
 }
 
 .nav-btn.is-active {
-  background: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--ink);
-  border-color: var(--line);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .segment {
@@ -172,7 +249,9 @@ body {
 }
 
 main {
-  margin-top: 28px;
+  margin: 24px auto 0;
+  max-width: 1100px;
+  padding: 0 24px;
   display: grid;
   gap: 24px;
 }
@@ -190,18 +269,22 @@ main {
   gap: 16px;
 }
 
-body.login-active .topbar {
+body.login-active .app-shell {
   display: none;
 }
 
+body.login-active main {
+  margin-top: 0;
+}
+
 body.workflow-active .app {
-  max-width: none;
-  width: 100%;
-  padding: 24px 32px 48px;
+  padding-bottom: 48px;
 }
 
 body.workflow-active main {
+  max-width: none;
   margin-top: 18px;
+  padding: 0 32px;
 }
 
 .admin-only {
@@ -687,6 +770,22 @@ textarea::placeholder {
   font-size: 13px;
   background: var(--input);
   color: var(--ink);
+}
+
+.page-header .control-tabs {
+  margin-top: 0;
+}
+
+.page-header .segment {
+  margin-top: 0;
+}
+
+.page-header .control-filter {
+  font-size: 11px;
+}
+
+.page-header .control-filter-group {
+  gap: 10px;
 }
 
 .control-list {
@@ -2350,14 +2449,27 @@ textarea::placeholder {
 }
 
 @media (max-width: 720px) {
-  .topbar {
-    flex-direction: column;
+  .app-header-inner {
+    grid-template-columns: 1fr;
     align-items: flex-start;
   }
 
-  .toolbar {
-    flex-direction: column;
-    align-items: flex-start;
+  .app-nav {
+    justify-content: flex-start;
+  }
+
+  .page-context {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .page-center {
+    grid-template-columns: 1fr;
+  }
+
+  .page-right {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .span-2 {

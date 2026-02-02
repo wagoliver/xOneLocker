@@ -10,6 +10,7 @@ const views = {
 };
 
 const navButtons = document.querySelectorAll(".nav-btn");
+const pageContexts = document.querySelectorAll(".page-context");
 const adminButtons = document.querySelectorAll(".admin-only");
 const newRuleButton = document.getElementById("new-rule-btn");
 const syncRulesButton = document.getElementById("sync-rules-btn");
@@ -228,6 +229,13 @@ function showView(viewName) {
 
   navButtons.forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.view === viewName);
+  });
+
+  pageContexts.forEach((context) => {
+    context.classList.toggle(
+      "is-active",
+      context.dataset.context === viewName
+    );
   });
 
   document.body.classList.toggle(
