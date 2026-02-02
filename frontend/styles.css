@@ -22,6 +22,9 @@
   --line: var(--border);
   --primary-dark: oklch(0.85 0 0);
   --xone-card: #1d284d;
+  --scroll-track: #141414;
+  --scroll-thumb: #2f6d5b;
+  --scroll-thumb-hover: #3a8d73;
 }
 
 * {
@@ -34,6 +37,27 @@ body {
   color: var(--ink);
   background: radial-gradient(circle at top, #1b1b1b 0%, var(--bg) 55%);
   min-height: 100vh;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+  border-radius: 0;
+  border: 2px solid var(--scroll-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
 }
 
 .bg-accent {
@@ -1052,7 +1076,7 @@ textarea::placeholder {
 .workflow-palette,
 .workflow-inspector {
   background: var(--card);
-  border-radius: var(--radius);
+  border-radius: 0;
   border: 1px solid var(--line);
   padding: 16px;
   box-shadow: var(--shadow);
@@ -1075,7 +1099,7 @@ textarea::placeholder {
   background: radial-gradient(circle at top, rgba(255, 255, 255, 0.08), rgba(10, 10, 10, 0.9) 55%);
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), var(--shadow);
-  border-radius: 26px;
+  border-radius: 0;
   padding: 18px;
 }
 
@@ -1097,7 +1121,7 @@ textarea::placeholder {
 }
 
 .palette-toggle {
-  border-radius: 999px;
+  border-radius: 0;
   padding: 4px 8px;
   font-size: 12px;
   line-height: 1;
@@ -1569,16 +1593,16 @@ textarea::placeholder {
 .brick-tile {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
-  padding: 8px 12px;
-  border-radius: 14px;
+  padding: 6px 10px;
+  border-radius: 0;
   cursor: grab;
   color: var(--ink);
   text-align: left;
   display: grid;
-  grid-template-columns: 12px 32px minmax(0, 1fr);
+  grid-template-columns: 10px 26px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  min-height: 52px;
+  gap: 8px;
+  min-height: 40px;
   position: relative;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
@@ -1625,8 +1649,8 @@ textarea::placeholder {
 }
 
 .brick-grip {
-  width: 12px;
-  height: 22px;
+  width: 10px;
+  height: 18px;
   position: relative;
   opacity: 0.7;
 }
@@ -1634,21 +1658,21 @@ textarea::placeholder {
 .brick-grip::before {
   content: "";
   position: absolute;
-  left: 4px;
-  top: 4px;
-  width: 4px;
-  height: 4px;
+  left: 3px;
+  top: 2px;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.5);
   box-shadow:
-    0 8px 0 rgba(255, 255, 255, 0.5),
-    0 16px 0 rgba(255, 255, 255, 0.5);
+    0 6px 0 rgba(255, 255, 255, 0.5),
+    0 12px 0 rgba(255, 255, 255, 0.5);
 }
 
 .brick-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 0;
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.06);
@@ -1657,13 +1681,13 @@ textarea::placeholder {
 }
 
 .brick-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .brick-icon img {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
@@ -1715,7 +1739,7 @@ textarea::placeholder {
 
 .brick-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .brick-subtitle {
