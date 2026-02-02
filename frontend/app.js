@@ -208,6 +208,7 @@ let inspectorRenderRaf = null;
 let xoneConfigLoading = null;
 const xoneCheckpointCache = new Map();
 const xoneCheckpointLoading = new Map();
+let workflowAutoRefreshPending = false;
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowVariablesContext = null;
@@ -295,6 +296,19 @@ function scheduleIdleTask(task) {
     return requestIdleCallback(() => task(), { timeout: 1200 });
   }
   return setTimeout(task, 0);
+}
+
+function triggerWorkflowStatusRefresh() {
+  if (workflowAutoRefreshPending) return;
+  workflowAutoRefreshPending = true;
+  scheduleIdleTask(async () => {
+    try {
+      await syncRules();
+      await loadControl();
+    } finally {
+      workflowAutoRefreshPending = false;
+    }
+  });
 }
 
 function getAuthToken() {
@@ -3401,6 +3415,7 @@ async function executeWorkflowFromStart(startNode) {
     );
     saveWorkflowState();
     renderWorkflow();
+    triggerWorkflowStatusRefresh();
   } finally {
     setWorkflowRunning(false);
   }
