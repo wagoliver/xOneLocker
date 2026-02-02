@@ -500,6 +500,17 @@ textarea::placeholder {
   box-shadow: var(--shadow);
 }
 
+#workflow-modal .modal-card {
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+}
+
+#workflow-modal-body {
+  overflow: auto;
+  padding-right: 6px;
+}
+
 #schedule-modal {
   z-index: 15;
 }
@@ -2273,10 +2284,30 @@ textarea::placeholder {
 .conditions-remove {
   height: 34px;
   padding: 0;
+  width: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
 }
 
 .conditions-add {
   justify-self: flex-start;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-only .icon {
+  width: 16px;
+  height: 16px;
 }
 
 .inspector-empty {
@@ -2285,6 +2316,20 @@ textarea::placeholder {
   border: 1px dashed var(--line);
   color: var(--muted);
   font-size: 13px;
+}
+
+.token-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.token-field .token-toggle,
+.token-field .token-copy {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1;
 }
 
 @keyframes fadeUp {

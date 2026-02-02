@@ -396,7 +396,21 @@
             <div class="form-grid">
               <label>
                 Bearer token
-                <input type="text" name="bearer_token" placeholder="Cole o token JWT" />
+                <div class="token-field">
+                  <input
+                    type="password"
+                    name="bearer_token"
+                    placeholder="Cole o token JWT"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button type="button" class="ghost token-toggle" aria-label="Mostrar token">
+                    Mostrar
+                  </button>
+                  <button type="button" class="ghost token-copy" aria-label="Copiar token">
+                    Copiar
+                  </button>
+                </div>
               </label>
             </div>
             <div id="token-feedback" class="feedback"></div>

@@ -21,6 +21,8 @@ const rulesList = document.getElementById("rules-list");
 const rulesFeedback = document.getElementById("rules-feedback");
 const ruleFeedback = document.getElementById("rule-feedback");
 const tokenFeedback = document.getElementById("token-feedback");
+const tokenToggleButton = document.querySelector(".token-toggle");
+const tokenCopyButton = document.querySelector(".token-copy");
 const auditList = document.getElementById("audit-list");
 const auditFeedback = document.getElementById("audit-feedback");
 const refreshAuditButton = document.getElementById("refresh-audit");
@@ -201,12 +203,14 @@ let workflowMenuNodeId = null;
 let workflowMenuEdge = null;
 let workflowScheduleMenuWorkflowId = null;
 let xoneConfigCache = null;
+let inspectorRenderRaf = null;
 let xoneConfigLoading = null;
 const xoneCheckpointCache = new Map();
 const xoneCheckpointLoading = new Map();
 let workflowModalNodeId = null;
 let workflowResponseNodeId = null;
 let workflowVariablesContext = null;
+const workflowInspectorDrafts = new Map();
 let workflowTableNodeId = null;
 let workflowItemsData = null;
 let workflowPaletteTab = "bricks";
@@ -276,6 +280,13 @@ function safeStorageRemove(key) {
   } catch {
     memoryStorage.delete(key);
   }
+}
+
+function scheduleIdleTask(task) {
+  if (typeof requestIdleCallback === "function") {
+    return requestIdleCallback(() => task(), { timeout: 1200 });
+  }
+  return setTimeout(task, 0);
 }
 
 function getAuthToken() {
@@ -1450,6 +1461,7 @@ function applyWorkflowDefinition(definition, name, workflowId) {
     }
     return;
   }
+  workflowInspectorDrafts.clear();
 
   workflowState.nodes = parsed.nodes
     .filter((node) => WORKFLOW_BRICK_TYPES.has(node?.type))
@@ -1946,12 +1958,13 @@ function normalizeConditionRow(row) {
   };
 }
 
-function ensureFilterConditions(node) {
-  if (!node.config) node.config = {};
-  if (!Array.isArray(node.config.conditions)) {
-    node.config.conditions = [normalizeConditionRow({})];
-  } else if (node.config.conditions.length === 0) {
-    node.config.conditions = [normalizeConditionRow({})];
+function ensureFilterConditions(target) {
+  const config = target?.config ?? target;
+  if (!config) return;
+  if (!Array.isArray(config.conditions)) {
+    config.conditions = [normalizeConditionRow({})];
+  } else if (config.conditions.length === 0) {
+    config.conditions = [normalizeConditionRow({})];
   }
 }
 
@@ -2282,16 +2295,28 @@ function applyWorkflowSelectionStyles(nodeId) {
   });
 }
 
+function scheduleWorkflowInspectorPanelRender() {
+  if (inspectorRenderRaf) {
+    cancelAnimationFrame(inspectorRenderRaf);
+  }
+  inspectorRenderRaf = requestAnimationFrame(() => {
+    inspectorRenderRaf = null;
+    renderWorkflowInspectorPanel();
+  });
+}
+
 function selectWorkflowNode(nodeId, options = {}) {
   const { render = true } = options;
+  const isSame = workflowState.selectedNodeId === nodeId;
   workflowState.selectedNodeId = nodeId;
-  saveWorkflowState();
   if (render) {
-    renderWorkflow();
+    if (!isSame) {
+      renderWorkflow();
+    }
   } else {
     applyWorkflowSelectionStyles(nodeId);
   }
-  renderWorkflowInspectorPanel();
+  scheduleWorkflowInspectorPanelRender();
 }
 
 function clearWorkflowConnection() {
@@ -2491,6 +2516,7 @@ function deleteWorkflowNode(nodeId) {
   workflowState.edges = workflowState.edges.filter(
     (edge) => edge.from !== nodeId && edge.to !== nodeId
   );
+  workflowInspectorDrafts.delete(nodeId);
   if (workflowState.selectedNodeId === nodeId) {
     workflowState.selectedNodeId = null;
   }
@@ -3475,6 +3501,63 @@ function getNodeDefaultItem(node, result) {
   return getValueByPath(payload, responsePath);
 }
 
+function cloneWorkflowConfig(config) {
+  return JSON.parse(JSON.stringify(config || {}));
+}
+
+function buildWorkflowInspectorDraft(node) {
+  const config = cloneWorkflowConfig(node?.config);
+  const cached = getXoneConfigCache();
+  return {
+    nodeId: node?.id || null,
+    config,
+    dirty: false,
+    xoneConfig: cached ? { ...cached } : null,
+    xonePatch: {},
+    xoneDirty: false,
+  };
+}
+
+function getWorkflowInspectorDraft(node) {
+  if (!node) return null;
+  if (!workflowInspectorDrafts.has(node.id)) {
+    workflowInspectorDrafts.set(node.id, buildWorkflowInspectorDraft(node));
+  }
+  return workflowInspectorDrafts.get(node.id);
+}
+
+function createMiniIcon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.classList.add("icon");
+  const paths = [];
+  if (name === "plus") {
+    paths.push({ d: "M12 5v14" });
+    paths.push({ d: "M5 12h14" });
+  } else if (name === "trash") {
+    paths.push({ d: "M4 7h16" });
+    paths.push({ d: "M9 7V5h6v2" });
+    paths.push({ d: "M7 7v11a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7" });
+    paths.push({ d: "M10 11v6" });
+    paths.push({ d: "M14 11v6" });
+  } else if (name === "check") {
+    paths.push({ d: "M5 13l4 4L19 7" });
+  }
+  paths.forEach((pathDef) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathDef.d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.append(path);
+  });
+  return svg;
+}
+
 function getVariableSuggestions(node) {
   const upstream = getUpstreamNode(node);
   if (!upstream) return [];
@@ -4150,13 +4233,13 @@ function renderWorkflow() {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
       });
 
       nodeEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
@@ -4214,13 +4297,13 @@ function renderWorkflow() {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
       });
 
       nodeEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
@@ -4408,13 +4491,13 @@ function renderWorkflow() {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
       });
 
       nodeEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
@@ -4555,13 +4638,13 @@ function renderWorkflow() {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
       });
 
       nodeEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
@@ -4707,13 +4790,13 @@ function renderWorkflow() {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
       });
 
       nodeEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        selectWorkflowNode(node.id);
+        selectWorkflowNode(node.id, { render: false });
         openWorkflowMenu(event.clientX, event.clientY, node.id);
       });
 
@@ -4821,13 +4904,13 @@ function renderWorkflow() {
 
     nodeEl.addEventListener("click", (event) => {
       event.stopPropagation();
-      selectWorkflowNode(node.id);
+      selectWorkflowNode(node.id, { render: false });
     });
 
     nodeEl.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      selectWorkflowNode(node.id);
+      selectWorkflowNode(node.id, { render: false });
       openWorkflowMenu(event.clientX, event.clientY, node.id);
     });
 
@@ -4858,6 +4941,9 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
     return;
   }
 
+  const draft = getWorkflowInspectorDraft(node);
+  const configDraft = draft?.config || node.config || {};
+
   const def = getWorkflowBrick(node.type);
   const card = document.createElement("div");
   card.className = "inspector-card";
@@ -4883,7 +4969,7 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           ? field.dependsOn
           : [field.dependsOn];
         const isVisible = deps.every((dep) => {
-          const currentValue = node.config?.[dep.key];
+          const currentValue = configDraft?.[dep.key];
           const expectedValues = dep.values || [dep.value];
           return expectedValues.includes(currentValue);
         });
@@ -4898,7 +4984,7 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
       let input = null;
       if (field.type === "conditions") {
-        ensureFilterConditions(node);
+        ensureFilterConditions(configDraft);
         const wrapper = document.createElement("div");
         wrapper.className = "conditions-editor";
 
@@ -4914,7 +5000,7 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           { value: "not contains", label: "not contains" },
         ];
 
-        node.config.conditions.forEach((condition, index) => {
+        configDraft.conditions.forEach((condition, index) => {
           const row = document.createElement("div");
           row.className = "conditions-row";
 
@@ -4939,26 +5025,26 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
           const removeBtn = document.createElement("button");
           removeBtn.type = "button";
-          removeBtn.className = "ghost conditions-remove";
-          removeBtn.textContent = "x";
+          removeBtn.className = "ghost conditions-remove icon-only";
+          removeBtn.setAttribute("aria-label", "Remover condicao");
+          removeBtn.append(createMiniIcon("trash"));
           removeBtn.addEventListener("click", () => {
-            node.config.conditions.splice(index, 1);
-            if (node.config.conditions.length === 0) {
-              node.config.conditions.push(normalizeConditionRow({}));
+            configDraft.conditions.splice(index, 1);
+            if (configDraft.conditions.length === 0) {
+              configDraft.conditions.push(normalizeConditionRow({}));
             }
-            saveWorkflowState();
-            renderWorkflow();
+            if (draft) draft.dirty = true;
             renderWorkflowInspectorPanel();
+            renderWorkflowModal();
           });
 
           const updateRow = () => {
-            node.config.conditions[index] = normalizeConditionRow({
+            configDraft.conditions[index] = normalizeConditionRow({
               field: fieldInput.value,
               operator: operatorSelect.value,
               value: valueInput.value,
             });
-            saveWorkflowState();
-            renderWorkflow();
+            if (draft) draft.dirty = true;
           };
 
           fieldInput.addEventListener("change", updateRow);
@@ -4971,13 +5057,15 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
 
         const addBtn = document.createElement("button");
         addBtn.type = "button";
-        addBtn.className = "ghost conditions-add";
-        addBtn.textContent = "Adicionar condicao";
+        addBtn.className = "ghost conditions-add btn-icon";
+        const addLabel = document.createElement("span");
+        addLabel.textContent = "Adicionar condicao";
+        addBtn.append(createMiniIcon("plus"), addLabel);
         addBtn.addEventListener("click", () => {
-          node.config.conditions.push(normalizeConditionRow({}));
-          saveWorkflowState();
-          renderWorkflow();
+          configDraft.conditions.push(normalizeConditionRow({}));
+          if (draft) draft.dirty = true;
           renderWorkflowInspectorPanel();
+          renderWorkflowModal();
         });
 
         wrapper.append(list, addBtn);
@@ -4998,22 +5086,22 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           input.append(optionEl);
         });
         const currentValue =
-          node.config?.[field.key] ?? field.default ?? "";
+          configDraft?.[field.key] ?? field.default ?? "";
         input.value = currentValue;
       } else if (field.type === "datetime") {
         input = document.createElement("input");
         input.type = "datetime-local";
-        const currentValue = node.config?.[field.key] ?? "";
+        const currentValue = configDraft?.[field.key] ?? "";
         input.value = currentValue ? toInputDateTime(currentValue) || currentValue : "";
       } else if (field.type === "time") {
         input = document.createElement("input");
         input.type = "time";
-        const currentValue = node.config?.[field.key] ?? "";
+        const currentValue = configDraft?.[field.key] ?? "";
         input.value = currentValue ? normalizeTime(currentValue) : "";
       } else if (field.type === "textarea") {
         input = document.createElement("textarea");
         input.placeholder = field.placeholder || "";
-        input.value = node.config?.[field.key] ?? "";
+        input.value = configDraft?.[field.key] ?? "";
         if (field.supportsVariables) {
           input.addEventListener("contextmenu", (event) => {
             event.preventDefault();
@@ -5030,52 +5118,72 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         }
         input.placeholder = field.placeholder || "";
         if (field.storage === "xone-config") {
-          const config = getXoneConfigCache();
-          const storedValue = config ? config[field.key] : "";
-          input.value = storedValue || "";
-          if (!config) {
+          const xoneConfig = draft?.xoneConfig || getXoneConfigCache();
+          const patchedValue = draft?.xonePatch?.[field.key];
+          const storedValue = xoneConfig ? xoneConfig[field.key] : "";
+          if (field.key === "clientSecret") {
+            input.value = patchedValue || "";
+          } else {
+            input.value =
+              patchedValue !== undefined ? patchedValue : storedValue || "";
+          }
+          if (!xoneConfig) {
             input.placeholder = "Carregando...";
             input.disabled = true;
-            fetchXoneConfig()
-              .then(() => {
-                renderWorkflowInspectorPanel();
-                renderWorkflowModal();
-              })
-              .catch(() => {
-                input.disabled = false;
-              });
+            scheduleIdleTask(() => {
+              fetchXoneConfig()
+                .then(() => {
+                  const draftEntry = workflowInspectorDrafts.get(node.id);
+                  if (draftEntry) {
+                    draftEntry.xoneConfig = {
+                      ...getXoneConfigCache(),
+                    };
+                  }
+                  renderWorkflowInspectorPanel();
+                  renderWorkflowModal();
+                })
+                .catch(() => {
+                  input.disabled = false;
+                });
+            });
           } else {
-            if (field.key === "clientSecret" && config.hasClientSecret) {
-              input.placeholder = "••••••••";
+            if (
+              field.key === "clientSecret" &&
+              xoneConfig.hasClientSecret &&
+              !patchedValue
+            ) {
+              input.placeholder = "********";
             }
           }
         } else {
-          input.value = node.config?.[field.key] ?? "";
+          input.value = configDraft?.[field.key] ?? "";
           if (node.type === "xone-data" && field.key === "checkpointValue") {
-            const endpointValue = String(node.config?.endpoint || "").trim();
-            const manualOverride = node.config?.checkpointOverride === true;
+            const endpointValue = String(configDraft?.endpoint || "").trim();
+            const manualOverride = configDraft?.checkpointOverride === true;
             const fallback = getTodayIsoDate();
             if (!input.value) {
-              input.value = node.config?.checkpointValue || fallback;
-              node.config.checkpointValue = input.value;
+              input.value = configDraft?.checkpointValue || fallback;
+              configDraft.checkpointValue = input.value;
             }
             input.placeholder = fallback;
             if (manualOverride) {
               input.dataset.touched = "1";
             } else if (endpointValue) {
-              fetchXoneCheckpoint(endpointValue)
-                .then((checkpoint) => {
-                  if (!checkpoint?.lastValue) return;
-                  if (input.dataset.touched === "1") return;
-                  input.value = checkpoint.lastValue;
-                  node.config.checkpointValue = checkpoint.lastValue;
-                  node.config.checkpointOverride = false;
-                  saveWorkflowState();
-                  renderWorkflow();
-                })
-                .catch(() => {
-                  // ignore
-                });
+              scheduleIdleTask(() => {
+                fetchXoneCheckpoint(endpointValue)
+                  .then((checkpoint) => {
+                    if (!checkpoint?.lastValue) return;
+                    if (input.dataset.touched === "1") return;
+                    input.value = checkpoint.lastValue;
+                    configDraft.checkpointValue = checkpoint.lastValue;
+                    configDraft.checkpointOverride = false;
+                    renderWorkflowInspectorPanel();
+                    renderWorkflowModal();
+                  })
+                  .catch(() => {
+                    // ignore
+                  });
+              });
             }
           }
         }
@@ -5086,13 +5194,13 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         field.default !== undefined &&
         field.storage !== "xone-config"
       ) {
-        const currentConfig = node.config?.[field.key];
+        const currentConfig = configDraft?.[field.key];
         const hasValue =
           currentConfig !== undefined &&
           currentConfig !== null &&
           currentConfig !== "";
         if (!hasValue) {
-          node.config[field.key] = field.default;
+          configDraft[field.key] = field.default;
           if (input.value === "" || input.value === null) {
             input.value = field.default;
           }
@@ -5106,36 +5214,28 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
             if (field.key === "clientSecret" && !value) {
               return;
             }
-            const payload = { [field.key]: value };
-            saveXoneConfig(payload)
-              .then(() => {
-                setWorkflowStatus("Configuracao xOne salva.", "success", {
-                  duration: 2500,
-                });
-              })
-              .catch((err) => {
-                setWorkflowStatus(
-                  err?.message || "Falha ao salvar configuracao xOne.",
-                  "error"
-                );
-              });
+            if (!draft.xoneConfig) {
+              draft.xoneConfig = {};
+            }
+            draft.xonePatch[field.key] = value;
+            draft.xoneConfig[field.key] = value;
+            draft.xoneDirty = true;
             return;
           }
-          node.config[field.key] = event.target.value;
+          configDraft[field.key] = event.target.value;
+          if (draft) draft.dirty = true;
           if (node.type === "xone-data" && field.key === "endpoint") {
             const nextEndpoint = String(event.target.value || "").trim();
             xoneCheckpointCache.delete(nextEndpoint);
-            node.config.checkpointOverride = false;
-            node.config.checkpointValue = "";
+            configDraft.checkpointOverride = false;
+            configDraft.checkpointValue = "";
           }
           if (node.type === "xone-data" && field.key === "checkpointValue") {
             input.dataset.touched = "1";
-            node.config.checkpointOverride = Boolean(
+            configDraft.checkpointOverride = Boolean(
               String(event.target.value || "").trim()
             );
           }
-          saveWorkflowState();
-          renderWorkflow();
           renderWorkflowInspectorPanel();
           renderWorkflowModal();
         });
@@ -5149,7 +5249,10 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
         label.append(hint);
       }
       if (field.type !== "conditions") {
-        const suggestions = getWorkflowFieldSuggestions(node, field);
+        const suggestions = getWorkflowFieldSuggestions(
+          { ...node, config: configDraft },
+          field
+        );
         if (
           suggestions.length &&
           input &&
@@ -5177,11 +5280,43 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
     actions.className = "actions";
     const saveButton = document.createElement("button");
     saveButton.type = "button";
-    saveButton.className = "primary";
-    saveButton.textContent = "Salvar";
-    saveButton.addEventListener("click", () => {
+    saveButton.className = "primary btn-icon";
+    const saveLabel = document.createElement("span");
+    saveLabel.textContent = "Salvar";
+    saveButton.append(createMiniIcon("check"), saveLabel);
+    saveButton.addEventListener("click", async () => {
+      const activeDraft = getWorkflowInspectorDraft(node);
+      if (!activeDraft) return;
+      node.config = cloneWorkflowConfig(activeDraft.config);
       saveWorkflowState();
-      setWorkflowStatus("Configuracoes salvas.", "success");
+      renderWorkflow();
+      renderWorkflowInspectorPanel();
+      renderWorkflowModal();
+
+      let xoneSaved = false;
+      if (activeDraft.xoneDirty && Object.keys(activeDraft.xonePatch).length) {
+        try {
+          const data = await saveXoneConfig(activeDraft.xonePatch);
+          activeDraft.xoneConfig = data ? { ...data } : activeDraft.xoneConfig;
+          activeDraft.xonePatch = {};
+          activeDraft.xoneDirty = false;
+          xoneSaved = true;
+        } catch (err) {
+          setWorkflowStatus(
+            err?.message || "Falha ao salvar configuracao xOne.",
+            "error"
+          );
+          return;
+        }
+      }
+
+      activeDraft.dirty = false;
+      setWorkflowStatus(
+        xoneSaved
+          ? "Configuracoes salvas. xOne atualizado."
+          : "Configuracoes salvas.",
+        "success"
+      );
       if (workflowModal?.classList.contains("is-open")) {
         closeWorkflowModal();
       }
@@ -5915,11 +6050,15 @@ if (workflowVariablesMenu) {
     input.selectionStart = input.selectionEnd = start + insertValue.length;
     if (context.nodeId) {
       const node = workflowState.nodes.find((item) => item.id === context.nodeId);
-      if (node && node.config) {
-        node.config.filters = input.value;
+      if (node) {
+        const draft = workflowInspectorDrafts.get(node.id) || null;
+        if (draft?.config) {
+          draft.config.filters = input.value;
+          draft.dirty = true;
+        } else if (node.config) {
+          node.config.filters = input.value;
+        }
       }
-      saveWorkflowState();
-      renderWorkflow();
       renderWorkflowInspectorPanel();
       renderWorkflowModal();
     }
@@ -8605,6 +8744,37 @@ tokenForm.addEventListener("submit", async (event) => {
   }
 });
 
+if (tokenToggleButton && tokenForm) {
+  tokenToggleButton.addEventListener("click", () => {
+    const input = tokenForm.elements.bearer_token;
+    if (!input) return;
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    tokenToggleButton.textContent = isHidden ? "Ocultar" : "Mostrar";
+  });
+}
+
+if (tokenCopyButton && tokenForm) {
+  tokenCopyButton.addEventListener("click", async () => {
+    const input = tokenForm.elements.bearer_token;
+    if (!input || !input.value) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(input.value);
+      } else {
+        input.select();
+        document.execCommand("copy");
+        input.setSelectionRange(0, 0);
+      }
+      tokenFeedback.textContent = "Token copiado.";
+      tokenFeedback.className = "feedback is-success";
+    } catch {
+      tokenFeedback.textContent = "Nao foi possivel copiar o token.";
+      tokenFeedback.className = "feedback is-error";
+    }
+  });
+}
+
 async function loadTokens() {
   tokenFeedback.textContent = "";
   tokenFeedback.className = "feedback";
@@ -8613,6 +8783,10 @@ async function loadTokens() {
     const response = await apiFetch("/api/token");
     const data = await response.json();
     tokenForm.elements.bearer_token.value = data.bearer_token || "";
+    tokenForm.elements.bearer_token.type = "password";
+    if (tokenToggleButton) {
+      tokenToggleButton.textContent = "Mostrar";
+    }
   } catch (err) {
     tokenFeedback.textContent = "Falha ao carregar token.";
     tokenFeedback.classList.add("is-error");
