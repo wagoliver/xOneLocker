@@ -145,6 +145,7 @@ const workflowTitle = document.getElementById("workflow-title");
 const workflowClearButton = document.getElementById("workflow-clear");
 const workflowSaveButton = document.getElementById("workflow-save");
 const workflowRunButton = document.getElementById("workflow-run");
+const workflowTimerPill = document.getElementById("workflow-timer");
 const workflowZoomOut = document.getElementById("workflow-zoom-out");
 const workflowZoomReset = document.getElementById("workflow-zoom-reset");
 const workflowZoomIn = document.getElementById("workflow-zoom-in");
@@ -1130,6 +1131,9 @@ const WORKFLOW_BRICKS = [
 
 const WORKFLOW_BRICK_TYPES = new Set(WORKFLOW_BRICKS.map((brick) => brick.type));
 let workflowStatusTimeout = null;
+let workflowTimerStart = null;
+let workflowTimerInterval = null;
+let workflowTimerLabel = "Executando fluxo";
 
 function getWorkflowBrick(type) {
   return WORKFLOW_BRICKS.find((brick) => brick.type === type);
@@ -1167,6 +1171,54 @@ function setWorkflowStatus(message, tone, options = {}) {
       workflowStatusTimeout = null;
     }, Math.max(1500, duration));
   }
+}
+
+function formatWorkflowDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function updateWorkflowTimerPill(elapsedMs, state = "idle") {
+  if (!workflowTimerPill) return;
+  const label = `Tempo ${formatWorkflowDuration(elapsedMs)}`;
+  workflowTimerPill.textContent = label;
+  workflowTimerPill.classList.remove("is-hidden", "is-running", "is-done");
+  if (state === "running") {
+    workflowTimerPill.classList.add("is-running");
+  } else if (state === "done") {
+    workflowTimerPill.classList.add("is-done");
+  }
+}
+
+function startWorkflowTimer(label = "Executando fluxo") {
+  stopWorkflowTimer();
+  workflowTimerLabel = label;
+  workflowTimerStart = performance.now();
+  updateWorkflowTimerPill(0, "running");
+  setWorkflowStatus(`${label}...`, "success", { autoHide: false });
+  workflowTimerInterval = window.setInterval(() => {
+    if (workflowTimerStart === null) return;
+    const elapsed = performance.now() - workflowTimerStart;
+    updateWorkflowTimerPill(elapsed, "running");
+  }, 1000);
+}
+
+function stopWorkflowTimer() {
+  if (workflowTimerInterval) {
+    clearInterval(workflowTimerInterval);
+    workflowTimerInterval = null;
+  }
+  if (workflowTimerStart === null) return null;
+  const elapsed = performance.now() - workflowTimerStart;
+  workflowTimerStart = null;
+  updateWorkflowTimerPill(elapsed, "done");
+  return elapsed;
 }
 
 function updateWorkflowTitle(nameOverride) {
@@ -3341,21 +3393,25 @@ async function executeWorkflowFromStart(startNode) {
       return;
     }
 
-    setWorkflowStatus("Executando fluxo...", "success");
+    startWorkflowTimer();
     let hasWarning = false;
+    let finalMessage = null;
+    let finalTone = null;
 
     for (const node of order) {
       if (node.type === "webhook" || node.type === "xone-collaborators") {
         const result = await executeWebhookNode(node);
         if (node.execStatus === "warning") {
           hasWarning = true;
-          setWorkflowStatus("Parametros faltando na integracao.", "warning");
+          finalMessage = "Parametros faltando na integracao.";
+          finalTone = "warning";
           break;
         }
         if (!result.ok || result.timedOut) {
           const errorMessage = result.timedOut
             ? "Timeout no webhook."
             : "Falha ao executar integracao.";
+          stopWorkflowTimer();
           setWorkflowStatus(errorMessage, "error");
           setNodeExecutionStatus(startNode, "error");
           renderWorkflow();
@@ -3365,13 +3421,15 @@ async function executeWorkflowFromStart(startNode) {
         const result = await executeXoneDataNode(node);
         if (node.execStatus === "warning") {
           hasWarning = true;
-          setWorkflowStatus("Parametros faltando no xOne Data.", "warning");
+          finalMessage = "Parametros faltando no xOne Data.";
+          finalTone = "warning";
           break;
         }
         if (!result.ok || result.timedOut) {
           const errorMessage = result.timedOut
             ? "Timeout no xOne Data."
             : "Falha ao coletar dados xOne.";
+          stopWorkflowTimer();
           setWorkflowStatus(errorMessage, "error");
           setNodeExecutionStatus(startNode, "error");
           renderWorkflow();
@@ -3381,7 +3439,8 @@ async function executeWorkflowFromStart(startNode) {
         const result = executeFilterNode(node);
         if (!result.ok) {
           hasWarning = true;
-          setWorkflowStatus("Filtro nao executado.", "warning");
+          finalMessage = "Filtro nao executado.";
+          finalTone = "warning";
           break;
         }
       } else if (node.type === "block") {
@@ -3389,9 +3448,11 @@ async function executeWorkflowFromStart(startNode) {
         if (!result.ok) {
           if (result.level === "warning") {
             hasWarning = true;
-            setWorkflowStatus("Bloqueio nao executado.", "warning");
+            finalMessage = "Bloqueio nao executado.";
+            finalTone = "warning";
             break;
           }
+          stopWorkflowTimer();
           setWorkflowStatus("Falha ao processar bloqueio.", "error");
           setNodeExecutionStatus(startNode, "error");
           renderWorkflow();
@@ -3409,14 +3470,17 @@ async function executeWorkflowFromStart(startNode) {
     }
 
     setNodeExecutionStatus(startNode, hasWarning ? "warning" : "success");
-    setWorkflowStatus(
-      hasWarning ? "Fluxo concluido com alertas." : "Fluxo executado.",
-      hasWarning ? "warning" : "success"
-    );
+    stopWorkflowTimer();
+    const baseMessage =
+      finalMessage ||
+      (hasWarning ? "Fluxo concluido com alertas." : "Fluxo executado.");
+    const baseTone = finalTone || (hasWarning ? "warning" : "success");
+    setWorkflowStatus(baseMessage, baseTone);
     saveWorkflowState();
     renderWorkflow();
     triggerWorkflowStatusRefresh();
   } finally {
+    stopWorkflowTimer();
     setWorkflowRunning(false);
   }
 }

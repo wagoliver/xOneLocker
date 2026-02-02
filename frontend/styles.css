@@ -1201,6 +1201,35 @@ textarea::placeholder {
   font-weight: 400;
 }
 
+.workflow-timer-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.workflow-timer-pill.is-hidden {
+  display: none;
+}
+
+.workflow-timer-pill.is-running {
+  color: #6ee7b7;
+  border-color: rgba(110, 231, 183, 0.45);
+  background: rgba(110, 231, 183, 0.12);
+}
+
+.workflow-timer-pill.is-done {
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .workflow-controls .control-btn {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
