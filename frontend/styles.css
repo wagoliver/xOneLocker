@@ -97,7 +97,7 @@ body {
 
 .app-nav {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
 }
@@ -1191,7 +1191,8 @@ textarea::placeholder {
 }
 
 .workflow-controls .control-btn,
-.workflow-controls .control-run {
+.workflow-controls .control-run,
+.workflow-actions-right .control-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1230,13 +1231,15 @@ textarea::placeholder {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.workflow-controls .control-btn {
+.workflow-controls .control-btn,
+.workflow-actions-right .control-btn {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--ink);
 }
 
-.workflow-controls .control-btn:hover {
+.workflow-controls .control-btn:hover,
+.workflow-actions-right .control-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.16);
 }
@@ -1245,6 +1248,21 @@ textarea::placeholder {
   height: 44px;
   padding: 10px 18px;
   gap: 10px;
+}
+
+.workflow-actions-right {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
 }
 
 .control-icon {
@@ -1633,6 +1651,12 @@ textarea::placeholder {
 
 .brick-icon.is-webhook {
   color: #9ec5ff;
+}
+
+.brick-icon.is-teams-message {
+  color: #ffffff;
+  background: #6264a7;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .brick-icon.is-xone-collaborators,
@@ -2530,6 +2554,15 @@ textarea::placeholder {
     right: 16px;
     transform: none;
     justify-content: center;
+    border-radius: 18px;
+  }
+
+  .workflow-actions-right {
+    top: 72px;
+    right: 16px;
+    left: auto;
+    flex-direction: column;
+    align-items: stretch;
     border-radius: 18px;
   }
 

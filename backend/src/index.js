@@ -21,6 +21,7 @@ const {
   PORT = "3000",
   INTEGRATION_API_BASE_URL = "https://integration-api.featval05.xonecloud.app.br",
   CORE_REGISTRY_BASE_URL,
+  TEAMS_FLOW_URL,
   AUTH_USER = "admin",
   AUTH_PASSWORD = "admin",
   AUTH_TOKEN_TTL_HOURS = "24",
@@ -1190,6 +1191,308 @@ function buildWebhookRequest(config) {
   return { url: requestUrl.toString(), options, warning };
 }
 
+function extractDataItems(value) {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value.items)) return value.items;
+  if (Array.isArray(value.data?.items)) return value.data.items;
+  if (Array.isArray(value.data?.item)) return value.data.item;
+  if (value.data?.item !== undefined) return value.data.item;
+  return value;
+}
+
+function normalizeTeamsItems(value) {
+  const extracted = extractDataItems(value);
+  if (extracted === undefined || extracted === null) return [];
+  if (Array.isArray(extracted)) return extracted;
+  return [extracted];
+}
+
+function getTemplateContextFromItem(item) {
+  if (isPrimitive(item)) {
+    return { value: item };
+  }
+  return item && typeof item === "object" ? item : null;
+}
+
+function interpolateTemplateString(template, context) {
+  if (!template) return { text: "", missing: [] };
+  const missing = new Set();
+  const text = String(template).replace(
+    /\{\{\s*([^}]+?)\s*\}\}/g,
+    (_match, path) => {
+      const clean = String(path || "").trim();
+      if (!clean) {
+        missing.add("{{}}");
+        return "";
+      }
+      if (!context || typeof context !== "object") {
+        missing.add(clean);
+        return "";
+      }
+      const value = getValueByPath(context, clean);
+      if (value === undefined || value === null) {
+        missing.add(clean);
+        return "";
+      }
+      if (!isPrimitive(value)) {
+        missing.add(clean);
+        return "";
+      }
+      return String(value);
+    }
+  );
+  return { text, missing: Array.from(missing) };
+}
+
+function buildTeamsPayloadForItem(config, item) {
+  const mode = String(config?.mode || "simple").toLowerCase();
+  const context = getTemplateContextFromItem(item);
+  if (mode === "advanced") {
+    const raw = config?.payloadJson;
+    if (!raw || !String(raw).trim()) {
+      return { payload: null, error: "Payload JSON obrigatorio.", missing: [] };
+    }
+    const templateResult = interpolateTemplateString(raw, context);
+    try {
+      const payload = JSON.parse(templateResult.text);
+      return { payload, error: null, missing: templateResult.missing };
+    } catch {
+      return {
+        payload: null,
+        error: "Payload JSON invalido apos interpolacao.",
+        missing: templateResult.missing,
+      };
+    }
+  }
+
+  const rawMessage = String(config?.message || "");
+  if (!rawMessage.trim()) {
+    return { payload: null, error: "Mensagem obrigatoria.", missing: [] };
+  }
+  const templateResult = interpolateTemplateString(rawMessage, context);
+  const finalMessage = String(templateResult.text || "").trim();
+  if (!finalMessage) {
+    return {
+      payload: null,
+      error: "Mensagem vazia apos interpolacao.",
+      missing: templateResult.missing,
+    };
+  }
+  return {
+    payload: { message: templateResult.text },
+    error: null,
+    missing: templateResult.missing,
+  };
+}
+
+function buildTeamsPayloads(config = {}, items, meta = {}) {
+  const mode = String(config?.mode || "simple").toLowerCase();
+  const maxItems = Math.max(1, normalizeNumber(config?.maxItems) || 50);
+  const list = normalizeTeamsItems(items);
+  const originalTotal =
+    Number.isFinite(meta?.totalItems) ? meta.totalItems : list.length;
+  const limited = list.slice(0, maxItems);
+  const warnings = [];
+  if (originalTotal > limited.length) {
+    warnings.push(`Limitado a ${maxItems} itens.`);
+  }
+
+  if (!limited.length) {
+    if (mode === "simple") {
+      const fallback = normalizeText(config?.fallbackMessage);
+      if (fallback) {
+        return {
+          payloads: [{ index: null, payload: { message: fallback } }],
+          warnings,
+          buildErrors: [],
+          missingVars: [],
+          total: 0,
+          originalTotal,
+        };
+      }
+    }
+    return {
+      payloads: [],
+      warnings,
+      buildErrors: [],
+      missingVars: [],
+      total: 0,
+      originalTotal,
+      error: "Nenhum data.items para enviar.",
+    };
+  }
+
+  const payloads = [];
+  const buildErrors = [];
+  const missingVars = new Set();
+
+  limited.forEach((item, index) => {
+    const built = buildTeamsPayloadForItem(config, item);
+    if (built.missing?.length) {
+      built.missing.forEach((name) => missingVars.add(name));
+    }
+    if (built.error || !built.payload) {
+      buildErrors.push({ index, error: built.error || "Payload invalido." });
+      return;
+    }
+    payloads.push({ index, payload: built.payload });
+  });
+
+  return {
+    payloads,
+    warnings,
+    buildErrors,
+    missingVars: Array.from(missingVars),
+    total: limited.length,
+    originalTotal,
+  };
+}
+
+async function executeTeamsRequest(config = {}, items = null, meta = {}) {
+  const result = {
+    ok: false,
+    status: null,
+    statusText: "",
+    url: "Teams Flow",
+    headers: null,
+    bodyText: "",
+    bodyJson: null,
+    warning: null,
+    error: null,
+    total: 0,
+    successCount: 0,
+    failedCount: 0,
+    results: [],
+  };
+
+  const flowUrl = normalizeText(TEAMS_FLOW_URL);
+  if (!flowUrl) {
+    result.error = "TEAMS_FLOW_URL obrigatorio.";
+    return result;
+  }
+
+  const mode = String(config?.mode || "simple").toLowerCase();
+  if (mode === "advanced" && !normalizeText(config?.payloadJson)) {
+    result.error = "Payload JSON obrigatorio.";
+    return result;
+  }
+  if (mode !== "advanced") {
+    const message = String(config?.message || "").trim();
+    const fallback = String(config?.fallbackMessage || "").trim();
+    if (!message && !fallback) {
+      result.error = "Mensagem obrigatoria.";
+      return result;
+    }
+  }
+
+  const build = buildTeamsPayloads(config, items, meta);
+  result.total = build.total;
+  if (build.error) {
+    result.error = build.error;
+    if (build.warnings.length) {
+      result.warning = build.warnings.join(" ");
+    }
+    result.bodyJson = {
+      total: build.total,
+      successCount: 0,
+      failedCount: 0,
+      warnings: build.warnings,
+      missingVars: build.missingVars,
+      results: [],
+    };
+    return result;
+  }
+
+  const timeoutSeconds = normalizeNumber(config?.timeoutSeconds) || 60;
+  const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
+
+  build.buildErrors.forEach((item) => {
+    result.results.push({ index: item.index, ok: false, error: item.error });
+    result.failedCount += 1;
+  });
+
+  for (const entry of build.payloads) {
+    try {
+      const response = await fetchWithTimeout(
+        flowUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(entry.payload),
+        },
+        timeoutMs
+      );
+      const text = await response.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = null;
+      }
+      const ok = response.ok;
+      result.results.push({
+        index: entry.index,
+        ok,
+        status: response.status,
+        statusText: response.statusText,
+        error: ok ? null : json?.error || text || "Falha ao enviar Teams.",
+      });
+      if (ok) {
+        result.successCount += 1;
+      } else {
+        result.failedCount += 1;
+      }
+      result.status = response.status;
+      result.statusText = response.statusText;
+      result.headers = Object.fromEntries(response.headers.entries());
+      result.bodyText = text;
+      result.bodyJson = json;
+    } catch (err) {
+      result.results.push({
+        index: entry.index,
+        ok: false,
+        error: err?.message || "Falha ao enviar Teams.",
+      });
+      result.failedCount += 1;
+    }
+  }
+
+  const warnings = [...build.warnings];
+  if (build.missingVars.length) {
+    warnings.push(`Variaveis nao encontradas: ${build.missingVars.join(", ")}.`);
+  }
+  if (build.buildErrors.length) {
+    warnings.push(`Falha ao montar ${build.buildErrors.length} mensagens.`);
+  }
+  if (result.failedCount > 0 && result.successCount > 0) {
+    warnings.push("Algumas mensagens falharam.");
+  }
+
+  result.ok = result.successCount > 0;
+  if (!result.ok) {
+    const firstError =
+      result.results.find((entry) => entry.error)?.error ||
+      "Falha ao enviar Teams.";
+    result.error = firstError;
+  }
+  if (warnings.length) {
+    result.warning = warnings.join(" ");
+  }
+
+  result.bodyJson = {
+    total: build.total,
+    successCount: result.successCount,
+    failedCount: result.failedCount,
+    warnings,
+    missingVars: build.missingVars,
+    results: result.results,
+  };
+
+  return result;
+}
+
 function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
@@ -1426,6 +1729,22 @@ async function executeWorkflowDefinition(definition) {
       results.push({ nodeId: node.id, type: node.type, ok: result.ok, result });
       if (!result.ok) {
         return { ok: false, error: result.error || "Webhook falhou.", results };
+      }
+    } else if (node.type === "teams-message") {
+      const sourceId = getUpstreamNodeId(node.id, edges);
+      const sourceItem = sourceId ? outputs.get(sourceId) : null;
+      const result = await executeTeamsRequest(node.config || {}, sourceItem);
+      if (sourceId) {
+        outputs.set(node.id, sourceItem);
+      } else {
+        outputs.set(node.id, null);
+      }
+      results.push({ nodeId: node.id, type: node.type, ok: result.ok, result });
+      if (result.warning) {
+        hasWarning = true;
+      }
+      if (!result.ok) {
+        return { ok: false, error: result.error || "Teams falhou.", results };
       }
     } else if (node.type === "filter") {
       const sourceId = getUpstreamNodeId(node.id, edges);
@@ -2364,6 +2683,27 @@ app.delete("/api/workflows/:id", async (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+app.post("/api/teams-message", async (req, res) => {
+  const config = req.body?.config ?? req.body ?? {};
+  const items = req.body?.items ?? null;
+  const totalItems = normalizeNumber(req.body?.totalItems);
+  const result = await executeTeamsRequest(config, items, { totalItems });
+  if (!result.ok) {
+    const message = String(result.error || "").toLowerCase();
+    const status =
+      message.includes("obrigator") ||
+      message.includes("payload") ||
+      message.includes("mensagem") ||
+      message.includes("data.items") ||
+      message.includes("json invalido")
+        ? 400
+        : 502;
+    res.status(status).json(result);
+    return;
+  }
+  res.json(result);
 });
 
 app.post("/api/xone-data", async (req, res) => {

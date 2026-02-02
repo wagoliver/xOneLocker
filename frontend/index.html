@@ -308,6 +308,34 @@
                     Tempo 00:00
                   </div>
                 </div>
+                <div class="workflow-actions-right" aria-label="Importar e exportar">
+                  <button id="workflow-import" class="ghost control-btn" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M14 4v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M12 9v7M8.5 12.5 12 9l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                      </svg>
+                    </span>
+                    <span class="control-label">Importar</span>
+                  </button>
+                  <button id="workflow-export" class="ghost control-btn" type="button">
+                    <span class="control-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M14 4v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path>
+                        <path d="M12 16V9M15.5 12.5 12 16l-3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                      </svg>
+                    </span>
+                    <span class="control-label">Exportar</span>
+                  </button>
+                  <input
+                    id="workflow-import-input"
+                    type="file"
+                    accept="application/json,.json"
+                    hidden
+                  />
+                </div>
                 <aside class="workflow-palette is-collapsed">
                   <div class="palette-header">
                     <div class="palette-heading">

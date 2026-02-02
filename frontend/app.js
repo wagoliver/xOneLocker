@@ -150,6 +150,9 @@ const workflowZoomOut = document.getElementById("workflow-zoom-out");
 const workflowZoomReset = document.getElementById("workflow-zoom-reset");
 const workflowZoomIn = document.getElementById("workflow-zoom-in");
 const workflowEmpty = document.getElementById("workflow-empty");
+const workflowImportButton = document.getElementById("workflow-import");
+const workflowExportButton = document.getElementById("workflow-export");
+const workflowImportInput = document.getElementById("workflow-import-input");
 
 let editingId = null;
 const scheduleCache = new Map();
@@ -1104,6 +1107,77 @@ const WORKFLOW_BRICKS = [
     ],
   },
   {
+    type: "teams-message",
+    title: "Teams",
+    subtitle: "Envia mensagem via Power Automate",
+    group: "Integracao",
+    summary: (node) => {
+      const mode = node.config?.mode || "simple";
+      if (mode === "advanced") return "Payload personalizado";
+      const message = String(node.config?.message || "").trim();
+      if (!message) return "Mensagem vazia";
+      const preview = message.length > 48 ? `${message.slice(0, 48)}...` : message;
+      return `Mensagem: ${preview}`;
+    },
+    fields: [
+      {
+        key: "name",
+        label: "Nome",
+        type: "text",
+        placeholder: "Ex: Aviso Teams",
+      },
+      {
+        key: "mode",
+        label: "Modo",
+        type: "select",
+        options: [
+          { value: "simple", label: "Simples" },
+          { value: "advanced", label: "Avancado" },
+        ],
+        default: "simple",
+      },
+      {
+        key: "message",
+        label: "Mensagem",
+        type: "textarea",
+        placeholder: "Digite a mensagem para o Teams",
+        hint: "Use {{campo}} para montar por item de data.items.",
+        supportsVariables: true,
+        dependsOn: { key: "mode", values: ["simple"] },
+      },
+      {
+        key: "fallbackMessage",
+        label: "Mensagem fallback",
+        type: "text",
+        placeholder: "Enviado quando data.items estiver vazio",
+        dependsOn: { key: "mode", values: ["simple"] },
+      },
+      {
+        key: "maxItems",
+        label: "Limite de envios",
+        type: "number",
+        placeholder: "50",
+        default: "50",
+      },
+      {
+        key: "payloadJson",
+        label: "Payload JSON",
+        type: "textarea",
+        placeholder: "{\n  \"message\": \"Sua mensagem\"\n}",
+        hint: "No modo avancado, o JSON aceita {{campo}} por item.",
+        supportsVariables: true,
+        dependsOn: { key: "mode", values: ["advanced"] },
+      },
+      {
+        key: "timeoutSeconds",
+        label: "Timeout (segundos)",
+        type: "number",
+        placeholder: "60",
+        default: String(WEBHOOK_DEFAULT_TIMEOUT_SECONDS),
+      },
+    ],
+  },
+  {
     type: "table",
     title: "Tabela",
     subtitle: "Visualiza retorno em tabela",
@@ -1395,18 +1469,90 @@ function serializeWorkflowDefinition() {
 
 function downloadWorkflowJson() {
   const payload = serializeWorkflowDefinition();
+  const name = safeStorageGet(WORKFLOW_NAME_KEY) || workflowTitle?.textContent;
+  if (name) {
+    payload.name = String(name).trim();
+  }
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeName = payload.name
+    ? String(payload.name)
+        .trim()
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLowerCase()
+    : "";
   link.href = url;
-  link.download = `workflow-${stamp}.json`;
+  link.download = safeName
+    ? `workflow-${safeName}-${stamp}.json`
+    : `workflow-${stamp}.json`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function normalizeImportedWorkflow(data) {
+  if (!data) return null;
+  if (data.definition && typeof data.definition === "object") {
+    return {
+      definition: data.definition,
+      name: data.name ? String(data.name).trim() : "",
+    };
+  }
+  if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+    return {
+      definition: data,
+      name: data.name ? String(data.name).trim() : "",
+    };
+  }
+  return null;
+}
+
+async function readFileText(file) {
+  if (file?.text) {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Falha ao ler arquivo."));
+    reader.readAsText(file);
+  });
+}
+
+async function importWorkflowFromFile(file) {
+  if (!file) return;
+  try {
+    const text = await readFileText(file);
+    const parsed = JSON.parse(text);
+    const normalized = normalizeImportedWorkflow(parsed);
+    if (!normalized?.definition) {
+      setWorkflowStatus("Arquivo invalido para importar.", "error");
+      return;
+    }
+    const fileName = file.name.replace(/\.[^.]+$/, "");
+    const resolvedName =
+      normalized.name || (fileName ? String(fileName).trim() : "");
+    if (resolvedName) {
+      safeStorageSet(WORKFLOW_NAME_KEY, resolvedName);
+    }
+    applyWorkflowDefinition(
+      normalized.definition,
+      resolvedName || "Fluxo importado",
+      null
+    );
+    setWorkflowStatus(
+      "Fluxo importado. Clique em Salvar para gravar.",
+      "success"
+    );
+  } catch (err) {
+    setWorkflowStatus(err?.message || "Falha ao importar arquivo.", "error");
+  }
 }
 
 async function saveWorkflowToServer(name) {
@@ -1616,6 +1762,14 @@ function getBrickIconSvg(type) {
           <path d="M7 7h4l2 3-2 3H7l-2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           <path d="M17 7h-4l-2-3 2-3h4l2 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           <path d="M17 17h-4l-2 3 2 3h4l2-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      `;
+    case "teams-message":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="7" y="7" width="10" height="3" rx="1.2" fill="currentColor"></rect>
+          <rect x="10.5" y="9" width="3" height="8" rx="1.2" fill="currentColor"></rect>
+          <circle cx="18" cy="9" r="2.2" fill="currentColor"></circle>
         </svg>
       `;
     case "flow":
@@ -2634,7 +2788,8 @@ function openWorkflowMenu(x, y, nodeId) {
   const isWebhook =
     node?.type === "webhook" ||
     node?.type === "xone-collaborators" ||
-    node?.type === "xone-data";
+    node?.type === "xone-data" ||
+    node?.type === "teams-message";
   const isBlock = node?.type === "block";
   const isTable = node?.type === "table";
   const canViewResponse = isWebhook || isBlock;
@@ -3271,6 +3426,12 @@ function extractDataItems(value) {
   return value;
 }
 
+function normalizeTeamsItems(value) {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value;
+  return [value];
+}
+
 function getUpstreamDataItems(node) {
   const upstream = getUpstreamNode(node);
   if (!upstream) return { upstream: null, items: null };
@@ -3401,27 +3562,45 @@ async function executeWorkflowFromStart(startNode) {
     for (const node of order) {
       if (node.type === "webhook" || node.type === "xone-collaborators") {
         const result = await executeWebhookNode(node);
-        if (node.execStatus === "warning") {
-          hasWarning = true;
-          finalMessage = "Parametros faltando na integracao.";
-          finalTone = "warning";
-          break;
-        }
-        if (!result.ok || result.timedOut) {
-          const errorMessage = result.timedOut
-            ? "Timeout no webhook."
-            : "Falha ao executar integracao.";
-          stopWorkflowTimer();
-          setWorkflowStatus(errorMessage, "error");
-          setNodeExecutionStatus(startNode, "error");
-          renderWorkflow();
-          return;
-        }
-      } else if (node.type === "xone-data") {
-        const result = await executeXoneDataNode(node);
-        if (node.execStatus === "warning") {
-          hasWarning = true;
-          finalMessage = "Parametros faltando no xOne Data.";
+      if (node.execStatus === "warning") {
+        hasWarning = true;
+        finalMessage = "Parametros faltando na integracao.";
+        finalTone = "warning";
+        break;
+      }
+      if (!result.ok || result.timedOut) {
+        const errorMessage = result.timedOut
+          ? "Timeout no webhook."
+          : "Falha ao executar integracao.";
+        stopWorkflowTimer();
+        setWorkflowStatus(errorMessage, "error");
+        setNodeExecutionStatus(startNode, "error");
+        renderWorkflow();
+        return;
+      }
+    } else if (node.type === "teams-message") {
+      const result = await executeTeamsNode(node);
+      if (node.execStatus === "warning") {
+        hasWarning = true;
+        finalMessage = "Parametros faltando no Teams.";
+        finalTone = "warning";
+        break;
+      }
+      if (!result.ok || result.timedOut) {
+        const errorMessage = result.timedOut
+          ? "Timeout no Teams."
+          : "Falha ao enviar mensagem no Teams.";
+        stopWorkflowTimer();
+        setWorkflowStatus(errorMessage, "error");
+        setNodeExecutionStatus(startNode, "error");
+        renderWorkflow();
+        return;
+      }
+    } else if (node.type === "xone-data") {
+      const result = await executeXoneDataNode(node);
+      if (node.execStatus === "warning") {
+        hasWarning = true;
+        finalMessage = "Parametros faltando no xOne Data.";
           finalTone = "warning";
           break;
         }
@@ -3564,6 +3743,24 @@ function buildWebhookRequest(node) {
   }
 
   return { url: requestUrl.toString(), options, warning };
+}
+
+function validateTeamsConfig(config = {}) {
+  const mode = String(config?.mode || "simple").toLowerCase();
+  if (mode === "advanced") {
+    const raw = config?.payloadJson;
+    if (!raw || !String(raw).trim()) {
+      return { error: "Payload JSON obrigatorio." };
+    }
+    return { error: null };
+  }
+
+  const message = String(config?.message || "").trim();
+  const fallback = String(config?.fallbackMessage || "").trim();
+  if (!message && !fallback) {
+    return { error: "Mensagem obrigatoria." };
+  }
+  return { error: null };
 }
 
 function getWebhookPayload(node, result) {
@@ -4005,6 +4202,97 @@ async function executeWebhookNode(node) {
   node.lastRunAt = new Date().toISOString();
   const item = getNodeDefaultItem(node, result);
   setNodeOutputItem(node, item);
+  propagateNodeOutput(node);
+  saveWorkflowState();
+  renderWorkflow();
+  renderWorkflowInspectorPanel();
+  renderWorkflowResponseModal();
+
+  return result;
+}
+
+async function executeTeamsNode(node) {
+  const start = performance.now();
+  const result = {
+    ok: false,
+    status: null,
+    statusText: "",
+    url: "",
+    elapsedMs: null,
+    headers: null,
+    bodyText: "",
+    bodyJson: null,
+    warning: null,
+    error: null,
+    timedOut: false,
+  };
+
+  const { error } = validateTeamsConfig(node.config || {});
+  if (error) {
+    result.error = error;
+    setNodeExecutionStatus(node, "warning");
+    node.lastResult = result;
+    node.lastRunAt = new Date().toISOString();
+    setNodeOutputItem(node, null);
+    propagateNodeOutput(node);
+    saveWorkflowState();
+    renderWorkflow();
+    renderWorkflowInspectorPanel();
+    renderWorkflowResponseModal();
+    return result;
+  }
+
+  try {
+    const { items } = getUpstreamDataItems(node);
+    const maxItems =
+      Math.max(1, normalizeNumber(node.config?.maxItems) || 50);
+    const list = normalizeTeamsItems(items);
+    const limited = list.slice(0, maxItems);
+    const response = await apiFetch("/api/teams-message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        config: node.config || {},
+        items: limited,
+        totalItems: list.length,
+      }),
+    });
+    const elapsed = Math.round(performance.now() - start);
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    result.ok = response.ok && (json?.ok !== false);
+    result.status = response.status;
+    result.statusText = response.statusText;
+    result.elapsedMs = elapsed;
+    result.headers = Object.fromEntries(response.headers.entries());
+    result.bodyText =
+      text.length > WORKFLOW_RESULT_LIMIT
+        ? `${text.slice(0, WORKFLOW_RESULT_LIMIT)}\n...`
+        : text;
+    result.bodyJson = json?.bodyJson ?? json;
+    if (json?.warning) result.warning = json.warning;
+    if (!result.ok) {
+      result.error = json?.error || text || "Falha ao enviar Teams.";
+    }
+    if (result.ok && result.warning) {
+      setNodeExecutionStatus(node, "warning");
+    } else {
+      setNodeExecutionStatus(node, result.ok ? "success" : "error");
+    }
+  } catch (err) {
+    result.error = err?.message || "Falha ao enviar Teams.";
+    setNodeExecutionStatus(node, "error");
+  }
+
+  node.lastResult = result;
+  node.lastRunAt = new Date().toISOString();
+  const { items } = getUpstreamDataItems(node);
+  setNodeOutputItem(node, items ?? null);
   propagateNodeOutput(node);
   saveWorkflowState();
   renderWorkflow();
@@ -5193,7 +5481,13 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           input.addEventListener("contextmenu", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            openWorkflowVariablesMenu(event.clientX, event.clientY, node, input);
+            openWorkflowVariablesMenu(
+              event.clientX,
+              event.clientY,
+              node,
+              input,
+              field.key
+            );
           });
         }
       } else {
@@ -5680,6 +5974,22 @@ function initializeWorkflow() {
       openWorkflowLoadModal();
     });
   }
+  if (workflowExportButton) {
+    workflowExportButton.addEventListener("click", () => {
+      downloadWorkflowJson();
+    });
+  }
+  if (workflowImportButton && workflowImportInput) {
+    workflowImportButton.addEventListener("click", () => {
+      workflowImportInput.click();
+    });
+    workflowImportInput.addEventListener("change", (event) => {
+      const file = event.target.files?.[0] || null;
+      if (!file) return;
+      importWorkflowFromFile(file);
+      event.target.value = "";
+    });
+  }
 
   if (workflowRunButton) {
     workflowRunButton.addEventListener("click", () => {
@@ -6139,11 +6449,12 @@ if (workflowVariablesMenu) {
       const node = workflowState.nodes.find((item) => item.id === context.nodeId);
       if (node) {
         const draft = workflowInspectorDrafts.get(node.id) || null;
+        const key = context.fieldKey || "filters";
         if (draft?.config) {
-          draft.config.filters = input.value;
+          draft.config[key] = input.value;
           draft.dirty = true;
         } else if (node.config) {
-          node.config.filters = input.value;
+          node.config[key] = input.value;
         }
       }
       renderWorkflowInspectorPanel();
@@ -7441,7 +7752,7 @@ function closeControlMenu() {
   controlMenu.dataset.groupId = "";
 }
 
-function openWorkflowVariablesMenu(x, y, node, input) {
+function openWorkflowVariablesMenu(x, y, node, input, fieldKey) {
   if (!workflowVariablesMenu) return;
   const body = workflowVariablesMenu.querySelector(".context-body");
   if (!body) return;
@@ -7462,7 +7773,7 @@ function openWorkflowVariablesMenu(x, y, node, input) {
       body.append(btn);
     });
   }
-  workflowVariablesContext = { nodeId: node?.id || null, input };
+  workflowVariablesContext = { nodeId: node?.id || null, input, fieldKey };
   workflowVariablesMenu.classList.add("is-open");
 
   const padding = 8;
