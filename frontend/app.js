@@ -153,6 +153,7 @@ const workflowEmpty = document.getElementById("workflow-empty");
 const workflowImportButton = document.getElementById("workflow-import");
 const workflowExportButton = document.getElementById("workflow-export");
 const workflowImportInput = document.getElementById("workflow-import-input");
+const workflowFullscreenButton = document.getElementById("workflow-fullscreen");
 
 let editingId = null;
 const scheduleCache = new Map();
@@ -1553,6 +1554,48 @@ async function importWorkflowFromFile(file) {
   } catch (err) {
     setWorkflowStatus(err?.message || "Falha ao importar arquivo.", "error");
   }
+}
+
+function isWorkflowFullscreenActive() {
+  return (
+    document.fullscreenElement === workflowCanvas ||
+    document.webkitFullscreenElement === workflowCanvas
+  );
+}
+
+function updateWorkflowFullscreenUi(isActive) {
+  document.body.classList.toggle("workflow-fullscreen", Boolean(isActive));
+  if (workflowFullscreenButton) {
+    workflowFullscreenButton.dataset.state = isActive ? "on" : "off";
+    const label = workflowFullscreenButton.querySelector(".control-label");
+    if (label) {
+      label.textContent = isActive ? "Sair da tela cheia" : "Tela cheia";
+    }
+  }
+}
+
+async function toggleWorkflowFullscreen() {
+  if (!workflowCanvas) return;
+  const isActive = isWorkflowFullscreenActive();
+  const request =
+    workflowCanvas.requestFullscreen || workflowCanvas.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  const canNative =
+    Boolean(request) &&
+    (document.fullscreenEnabled ||
+      document.webkitFullscreenEnabled ||
+      typeof document.fullscreenElement !== "undefined");
+  if (canNative && request && exit) {
+    if (isActive) {
+      await exit.call(document);
+    } else {
+      await request.call(workflowCanvas);
+    }
+    return;
+  }
+
+  const fallbackActive = document.body.classList.contains("workflow-fullscreen");
+  updateWorkflowFullscreenUi(!fallbackActive);
 }
 
 async function saveWorkflowToServer(name) {
@@ -4519,11 +4562,14 @@ function renderWorkflowPalette() {
       title.className = "brick-title";
       title.textContent = brick.title;
 
-      const subtitle = document.createElement("span");
-      subtitle.className = "brick-subtitle";
-      subtitle.textContent = brick.subtitle;
+      if (brick.subtitle) {
+        const tooltipText = String(brick.subtitle);
+        button.setAttribute("data-tooltip", tooltipText);
+        button.setAttribute("aria-label", `${brick.title} - ${tooltipText}`);
+        button.setAttribute("title", tooltipText);
+      }
 
-      info.append(title, subtitle);
+      info.append(title);
       button.append(grip, icon, info);
       section.append(button);
     });
@@ -5990,6 +6036,22 @@ function initializeWorkflow() {
       event.target.value = "";
     });
   }
+  if (workflowFullscreenButton) {
+    workflowFullscreenButton.addEventListener("click", () => {
+      toggleWorkflowFullscreen().catch(() => {
+        updateWorkflowFullscreenUi(
+          !document.body.classList.contains("workflow-fullscreen")
+        );
+      });
+    });
+  }
+
+  document.addEventListener("fullscreenchange", () => {
+    updateWorkflowFullscreenUi(isWorkflowFullscreenActive());
+  });
+  document.addEventListener("webkitfullscreenchange", () => {
+    updateWorkflowFullscreenUi(isWorkflowFullscreenActive());
+  });
 
   if (workflowRunButton) {
     workflowRunButton.addEventListener("click", () => {

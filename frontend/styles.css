@@ -1569,15 +1569,17 @@ textarea::placeholder {
 .brick-tile {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
-  padding: 12px 14px;
-  border-radius: 16px;
+  padding: 8px 12px;
+  border-radius: 14px;
   cursor: grab;
   color: var(--ink);
   text-align: left;
   display: grid;
-  grid-template-columns: 12px 34px minmax(0, 1fr);
+  grid-template-columns: 12px 32px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-height: 52px;
+  position: relative;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
@@ -1592,9 +1594,39 @@ textarea::placeholder {
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
 }
 
+.brick-tile::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(6px);
+  min-width: 180px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(18, 18, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 10;
+  white-space: normal;
+}
+
+.brick-tile[data-tooltip]:hover::after,
+.brick-tile[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .brick-grip {
   width: 12px;
-  height: 26px;
+  height: 22px;
   position: relative;
   opacity: 0.7;
 }
@@ -1614,9 +1646,9 @@ textarea::placeholder {
 }
 
 .brick-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.06);
@@ -1682,17 +1714,18 @@ textarea::placeholder {
 }
 
 .brick-title {
-  font-weight: 700;
-  font-size: 16px;
+  font-weight: 600;
+  font-size: 14px;
 }
 
 .brick-subtitle {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
-  line-height: 1.4;
-  max-height: 2.8em;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .brick-tile::after {
+    display: none;
+  }
 }
 
 .workflow-canvas {
@@ -1708,6 +1741,38 @@ textarea::placeholder {
   background-size: 24px 24px;
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.workflow-canvas:fullscreen,
+.workflow-canvas:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  margin: 0;
+}
+
+body.workflow-fullscreen {
+  overflow: hidden;
+}
+
+body.workflow-fullscreen .app-header,
+body.workflow-fullscreen .page-header {
+  display: none;
+}
+
+body.workflow-fullscreen .app {
+  padding: 0;
+}
+
+body.workflow-fullscreen .workflow-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  z-index: 50;
 }
 
 .workflow-canvas.is-pan-ready {
