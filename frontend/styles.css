@@ -2407,6 +2407,13 @@ body.workflow-fullscreen .workflow-canvas {
   z-index: 2;
 }
 
+.node-port::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 999px;
+}
+
 .node-port.in {
   left: -6px;
 }
@@ -2687,11 +2694,14 @@ body[data-theme="light"] {
   color-scheme: light;
   --background: #f2ece4;
   --foreground: #1f2a37;
+  --bg: var(--background);
+  --ink: var(--foreground);
   --card: #f8f3ec;
   --card-foreground: #1f2a37;
   --muted-foreground: #4a5a6b;
   --muted: var(--muted-foreground);
   --border: #b7ab9c;
+  --line: var(--border);
   --input: #f9f4ee;
   --primary: #1f3f59;
   --primary-foreground: #f7f2ec;
@@ -2704,6 +2714,7 @@ body[data-theme="light"] {
   --scroll-thumb: #b2a89b;
   --scroll-thumb-hover: #a29586;
   --shadow: 0 16px 36px rgba(37, 32, 26, 0.12);
+  color: var(--foreground);
   background-color: #f2ede6;
   background-image: radial-gradient(
     900px circle at 50% 0%,
@@ -3039,6 +3050,12 @@ body[data-theme="light"] .workflow-node {
   border-color: #b9aea1;
   box-shadow: 0 12px 28px rgba(35, 30, 24, 0.16);
   color: #2f3f50;
+}
+
+body[data-theme="light"] .workflow-node.is-start {
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 body[data-theme="light"] .workflow-node.is-selected {

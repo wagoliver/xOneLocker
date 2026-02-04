@@ -235,6 +235,7 @@ const workflowState = {
   loaded: false,
   workflowId: null,
 };
+const WORKFLOW_CONNECT_SNAP_RADIUS = 28;
 const workflowViewport = {
   scale: 1,
   x: 0,
@@ -1170,6 +1171,14 @@ const WORKFLOW_BRICKS = [
         label: "Nome",
         type: "text",
         placeholder: "Ex: Aviso Teams",
+      },
+      {
+        key: "flowUrl",
+        label: "Webhook do Teams",
+        type: "text",
+        placeholder: "https://... (Incoming Webhook ou Power Automate)",
+        hint: "Opcional. Se vazio, usa o webhook configurado no servidor.",
+        excludeFromSummary: true,
       },
       {
         key: "mode",
@@ -2648,17 +2657,47 @@ function clearWorkflowConnection() {
   setWorkflowStatus("");
 }
 
+function getClosestWorkflowInputPort(clientX, clientY) {
+  if (!workflowNodesLayer) return null;
+  const ports = workflowNodesLayer.querySelectorAll(".node-port.in");
+  let closest = null;
+  ports.forEach((port) => {
+    const nodeId = port.dataset.nodeId;
+    if (!nodeId || nodeId === workflowState.connectingFrom) return;
+    const rect = port.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const distance = Math.hypot(clientX - centerX, clientY - centerY);
+    if (!closest || distance < closest.distance) {
+      closest = { port, centerX, centerY, distance };
+    }
+  });
+  if (!closest || closest.distance > WORKFLOW_CONNECT_SNAP_RADIUS) {
+    return null;
+  }
+  return closest;
+}
+
 function updateWorkflowConnectingPosition(clientX, clientY) {
   if (!workflowState.connectingFrom || !workflowCanvas) return;
   const rect = workflowCanvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const clampedX = Math.min(Math.max(clientX - rect.left, 0), rect.width);
   const clampedY = Math.min(Math.max(clientY - rect.top, 0), rect.height);
-  workflowState.connectingPosition = { x: clampedX, y: clampedY };
+  const snap = getClosestWorkflowInputPort(clientX, clientY);
+  if (snap) {
+    workflowState.connectingPosition = {
+      x: snap.centerX - rect.left,
+      y: snap.centerY - rect.top,
+    };
+  } else {
+    workflowState.connectingPosition = { x: clampedX, y: clampedY };
+  }
   scheduleWorkflowEdgesRender();
 
   const hovered = document.elementFromPoint(clientX, clientY);
-  const port = hovered?.closest?.(".node-port.in");
+  const hoveredPort = hovered?.closest?.(".node-port.in");
+  const port = snap?.port || hoveredPort;
   if (port && port.dataset.nodeId === workflowState.connectingFrom) {
     if (workflowConnectingHoverPort) {
       workflowConnectingHoverPort.classList.remove("is-hover");
@@ -2691,8 +2730,9 @@ function startWorkflowConnection(nodeId, event) {
 
 function finishWorkflowConnection(event) {
   if (!workflowState.connectingFrom) return;
+  const snap = getClosestWorkflowInputPort(event.clientX, event.clientY);
   const hovered = document.elementFromPoint(event.clientX, event.clientY);
-  const port = hovered?.closest?.(".node-port.in");
+  const port = snap?.port || hovered?.closest?.(".node-port.in");
   if (port?.dataset?.nodeId) {
     createWorkflowEdge(workflowState.connectingFrom, port.dataset.nodeId);
     setWorkflowStatus("Conexao criada.", "success");
@@ -3835,6 +3875,10 @@ function buildWebhookRequest(node) {
 }
 
 function validateTeamsConfig(config = {}) {
+  const flowUrl = String(config?.flowUrl || "").trim();
+  if (flowUrl && !/^https:\/\//i.test(flowUrl)) {
+    return { error: "Webhook do Teams deve iniciar com https://." };
+  }
   const mode = String(config?.mode || "simple").toLowerCase();
   if (mode === "advanced") {
     const raw = config?.payloadJson;

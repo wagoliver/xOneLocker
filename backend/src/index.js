@@ -1250,8 +1250,9 @@ function interpolateTemplateString(template, context) {
   return { text, missing: Array.from(missing) };
 }
 
-function buildTeamsPayloadForItem(config, item) {
+function buildTeamsPayloadForItem(config, item, options = {}) {
   const mode = String(config?.mode || "simple").toLowerCase();
+  const payloadKey = normalizeText(options.payloadKey) || "message";
   const context = getTemplateContextFromItem(item);
   if (mode === "advanced") {
     const raw = config?.payloadJson;
@@ -1285,14 +1286,15 @@ function buildTeamsPayloadForItem(config, item) {
     };
   }
   return {
-    payload: { message: templateResult.text },
+    payload: { [payloadKey]: templateResult.text },
     error: null,
     missing: templateResult.missing,
   };
 }
 
-function buildTeamsPayloads(config = {}, items, meta = {}) {
+function buildTeamsPayloads(config = {}, items, meta = {}, options = {}) {
   const mode = String(config?.mode || "simple").toLowerCase();
+  const payloadKey = normalizeText(options.payloadKey) || "message";
   const maxItems = Math.max(1, normalizeNumber(config?.maxItems) || 50);
   const list = normalizeTeamsItems(items);
   const originalTotal =
@@ -1308,7 +1310,7 @@ function buildTeamsPayloads(config = {}, items, meta = {}) {
       const fallback = normalizeText(config?.fallbackMessage);
       if (fallback) {
         return {
-          payloads: [{ index: null, payload: { message: fallback } }],
+          payloads: [{ index: null, payload: { [payloadKey]: fallback } }],
           warnings,
           buildErrors: [],
           missingVars: [],
@@ -1333,7 +1335,7 @@ function buildTeamsPayloads(config = {}, items, meta = {}) {
   const missingVars = new Set();
 
   limited.forEach((item, index) => {
-    const built = buildTeamsPayloadForItem(config, item);
+    const built = buildTeamsPayloadForItem(config, item, { payloadKey });
     if (built.missing?.length) {
       built.missing.forEach((name) => missingVars.add(name));
     }
@@ -1354,6 +1356,18 @@ function buildTeamsPayloads(config = {}, items, meta = {}) {
   };
 }
 
+function isAllowedTeamsFlowUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname.toLowerCase();
+    return host.endsWith("webhook.office.com") || host.endsWith("logic.azure.com");
+  } catch {
+    return false;
+  }
+}
+
 async function executeTeamsRequest(config = {}, items = null, meta = {}) {
   const result = {
     ok: false,
@@ -1371,11 +1385,17 @@ async function executeTeamsRequest(config = {}, items = null, meta = {}) {
     results: [],
   };
 
-  const flowUrl = normalizeText(TEAMS_FLOW_URL);
+  const flowUrl = normalizeText(config?.flowUrl) || normalizeText(TEAMS_FLOW_URL);
   if (!flowUrl) {
     result.error = "TEAMS_FLOW_URL obrigatorio.";
     return result;
   }
+  if (!isAllowedTeamsFlowUrl(flowUrl)) {
+    result.error =
+      "Webhook Teams invalido. Use um link https://*.webhook.office.com ou https://*.logic.azure.com.";
+    return result;
+  }
+  result.url = flowUrl;
 
   const mode = String(config?.mode || "simple").toLowerCase();
   if (mode === "advanced" && !normalizeText(config?.payloadJson)) {
@@ -1391,7 +1411,9 @@ async function executeTeamsRequest(config = {}, items = null, meta = {}) {
     }
   }
 
-  const build = buildTeamsPayloads(config, items, meta);
+  const host = new URL(flowUrl).hostname.toLowerCase();
+  const payloadKey = host.endsWith("webhook.office.com") ? "text" : "message";
+  const build = buildTeamsPayloads(config, items, meta, { payloadKey });
   result.total = build.total;
   if (build.error) {
     result.error = build.error;
