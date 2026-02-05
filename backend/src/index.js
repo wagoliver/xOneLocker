@@ -417,6 +417,101 @@ function normalizeTimeForApi(value) {
   return text;
 }
 
+function parseDynamicDateExpression(value, now = new Date()) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const text = raw.toLowerCase().replace(/\s+/g, "");
+  if (text === "now") return new Date(now);
+  if (text === "@d") {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  if (text === "@h") {
+    const date = new Date(now);
+    date.setMinutes(0, 0, 0);
+    return date;
+  }
+  if (text === "@m") {
+    const date = new Date(now);
+    date.setSeconds(0, 0);
+    return date;
+  }
+  const match = text.match(/^now([+-])(\d+)([dhm])$/);
+  if (!match) return null;
+  const sign = match[1] === "-" ? -1 : 1;
+  const amount = Number(match[2]);
+  if (!Number.isFinite(amount)) return null;
+  const unit = match[3];
+  const date = new Date(now);
+  if (unit === "d") {
+    date.setDate(date.getDate() + sign * amount);
+  } else if (unit === "h") {
+    date.setHours(date.getHours() + sign * amount);
+  } else if (unit === "m") {
+    date.setMinutes(date.getMinutes() + sign * amount);
+  } else {
+    return null;
+  }
+  return date;
+}
+
+function resolveScheduleDateValue(value, now = new Date()) {
+  const text = normalizeText(value);
+  if (!text) return { value: null, date: null, error: null };
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return { value: parsed.toISOString(), date: parsed, error: null };
+  }
+  const dynamic = parseDynamicDateExpression(text, now);
+  if (!dynamic) {
+    return { value: null, date: null, error: "Data dinamica invalida." };
+  }
+  return { value: dynamic.toISOString(), date: dynamic, error: null };
+}
+
+function formatDateTimeBr(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (num) => String(num).padStart(2, "0");
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function getBlockScheduleDateInputs(config) {
+  const dateMode = normalizeText(config?.dateMode) || "calendar";
+  const startInput =
+    dateMode === "dynamic" ? config?.startDateExpr : config?.startDate;
+  const endInput =
+    dateMode === "dynamic" ? config?.endDateExpr : config?.endDate;
+  return { startInput, endInput, dateMode };
+}
+
+function buildBlockFormTemplateContext(config, options = {}) {
+  const formContext = { ...(config || {}) };
+  const referenceNow = options.referenceNow || new Date();
+  const { startInput, endInput } = getBlockScheduleDateInputs(config);
+  const startResolved = resolveScheduleDateValue(startInput, referenceNow);
+  const endResolved = resolveScheduleDateValue(endInput, referenceNow);
+  if (startResolved.date) {
+    formContext.inicio = formatDateTimeBr(startResolved.date);
+  }
+  if (endResolved.date) {
+    formContext.fim = formatDateTimeBr(endResolved.date);
+  }
+  return formContext;
+}
+
+function buildBlockMessageTemplateContext(config, entry, options = {}) {
+  return {
+    item: getTemplateContextFromItem(entry),
+    form: buildBlockFormTemplateContext(config, options),
+  };
+}
+
 function parseKeyValueLines(input) {
   const result = {};
   if (!input) return result;
@@ -1522,8 +1617,18 @@ async function executeTeamsRequest(config = {}, items = null, meta = {}) {
 function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
-  const startDate = normalizeOptional(config?.startDate);
-  const endDate = normalizeOptional(config?.endDate);
+  const { startInput, endInput } = getBlockScheduleDateInputs(config);
+  const referenceNow = options.referenceNow || new Date();
+  const startResolved = resolveScheduleDateValue(startInput, referenceNow);
+  if (startResolved.error) {
+    return { error: "Inicio dinamico invalido." };
+  }
+  const endResolved = resolveScheduleDateValue(endInput, referenceNow);
+  if (endInput && endResolved.error) {
+    return { error: "Fim dinamico invalido." };
+  }
+  const startDate = startResolved.value;
+  const endDate = endResolved.value;
   const recurrenceType = normalizeNumber(config?.recurrenceType);
   const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
   const resolvedStartTime =
@@ -1533,9 +1638,19 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const startTime = normalizeTimeForApi(resolvedStartTime);
   const endTime = normalizeTimeForApi(resolvedEndTime);
   const targetType = normalizeNumber(config?.targetType) ?? 0;
-  const message =
+  const messageTemplate =
     normalizeText(config?.message) ||
     (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+  const templateContext = buildBlockMessageTemplateContext(
+    config,
+    options.entry,
+    { referenceNow }
+  );
+  const templateResult = interpolateTemplateString(
+    messageTemplate,
+    templateContext
+  );
+  const message = String(templateResult.text || "").trim();
   const normalizedTarget = normalizeText(targetValue);
 
   if (
@@ -1585,8 +1700,9 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
 function buildBlockConfiguredItem(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
-  const startDate = normalizeOptional(config?.startDate);
-  const endDate = normalizeOptional(config?.endDate);
+  const { startInput, endInput } = getBlockScheduleDateInputs(config);
+  const startDate = normalizeOptional(startInput);
+  const endDate = normalizeOptional(endInput);
   const recurrenceType = normalizeNumber(config?.recurrenceType);
   const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
   const resolvedStartTime =
@@ -1596,9 +1712,20 @@ function buildBlockConfiguredItem(config, targetValue, options = {}) {
   const startTime = normalizeTimeForApi(resolvedStartTime);
   const endTime = normalizeTimeForApi(resolvedEndTime);
   const targetType = normalizeNumber(config?.targetType) ?? 0;
-  const message =
+  const referenceNow = options.referenceNow || new Date();
+  const messageTemplate =
     normalizeText(config?.message) ||
     (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+  const templateContext = buildBlockMessageTemplateContext(
+    config,
+    options.entry,
+    { referenceNow }
+  );
+  const templateResult = interpolateTemplateString(
+    messageTemplate,
+    templateContext
+  );
+  const message = String(templateResult.text || "").trim();
 
   return {
     message,
@@ -1820,6 +1947,7 @@ async function executeWorkflowDefinition(definition) {
       const sourceMode = node.config?.sourceMode || "data";
       const timeSource = node.config?.timeSource || "manual";
       const sourceLabel = getWorkflowNodeLabel(node);
+      const referenceNow = new Date();
       let targets = [];
 
       if (sourceMode === "manual") {
@@ -1862,6 +1990,8 @@ async function executeWorkflowDefinition(definition) {
         return buildBlockConfiguredItem(node.config || {}, target, {
           ...timeOverrides,
           sourceLabel,
+          entry,
+          referenceNow,
         });
       });
 
@@ -1879,7 +2009,7 @@ async function executeWorkflowDefinition(definition) {
         const { payload, error } = buildBlockSchedulePayload(
           node.config || {},
           target,
-          { ...timeOverrides, sourceLabel }
+          { ...timeOverrides, sourceLabel, entry, referenceNow }
         );
         if (error || !payload) {
           failedCount += 1;
@@ -3306,7 +3436,13 @@ app.post("/api/schedules", async (req, res) => {
   const message = normalizeOptional(req.body.message);
   const actionType = normalizeNumber(req.body.actionType);
   const scheduleType = normalizeNumber(req.body.scheduleType);
-  const startDate = normalizeOptional(req.body.startDate);
+  const rawStartDate = normalizeOptional(req.body.startDate);
+  const startResolved = resolveScheduleDateValue(rawStartDate);
+  if (rawStartDate && startResolved.error) {
+    res.status(400).json({ error: "Inicio dinamico invalido." });
+    return;
+  }
+  const startDate = startResolved.value;
   const targetType = normalizeNumber(req.body.targetType);
   const targetValue = normalizeOptional(req.body.targetValue);
 
@@ -3325,7 +3461,13 @@ app.post("/api/schedules", async (req, res) => {
     return;
   }
 
-  const endDate = normalizeOptional(req.body.endDate);
+  const rawEndDate = normalizeOptional(req.body.endDate);
+  const endResolved = resolveScheduleDateValue(rawEndDate);
+  if (rawEndDate && endResolved.error) {
+    res.status(400).json({ error: "Fim dinamico invalido." });
+    return;
+  }
+  const endDate = endResolved.value;
   const recurrenceType = normalizeNumber(req.body.recurrenceType);
   const daysOfWeek = normalizeArray(req.body.daysOfWeek);
   const startTime = normalizeOptional(req.body.startTime);
@@ -3405,7 +3547,13 @@ app.put("/api/schedules/:id", async (req, res) => {
   const message = normalizeOptional(req.body.message);
   const actionType = normalizeNumber(req.body.actionType);
   const scheduleType = normalizeNumber(req.body.scheduleType);
-  const startDate = normalizeOptional(req.body.startDate);
+  const rawStartDate = normalizeOptional(req.body.startDate);
+  const startResolved = resolveScheduleDateValue(rawStartDate);
+  if (rawStartDate && startResolved.error) {
+    res.status(400).json({ error: "Inicio dinamico invalido." });
+    return;
+  }
+  const startDate = startResolved.value;
   const targetType = normalizeNumber(req.body.targetType);
   const targetValue = normalizeOptional(req.body.targetValue);
 
@@ -3424,7 +3572,13 @@ app.put("/api/schedules/:id", async (req, res) => {
     return;
   }
 
-  const endDate = normalizeOptional(req.body.endDate);
+  const rawEndDate = normalizeOptional(req.body.endDate);
+  const endResolved = resolveScheduleDateValue(rawEndDate);
+  if (rawEndDate && endResolved.error) {
+    res.status(400).json({ error: "Fim dinamico invalido." });
+    return;
+  }
+  const endDate = endResolved.value;
   const recurrenceType = normalizeNumber(req.body.recurrenceType);
   const daysOfWeek = normalizeArray(req.body.daysOfWeek);
   const startTime = normalizeOptional(req.body.startTime);

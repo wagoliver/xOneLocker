@@ -759,7 +759,9 @@ const WORKFLOW_BRICKS = [
         key: "message",
         label: "Mensagem",
         type: "text",
-        placeholder: "Ex: Agendamento de bloqueio",
+        placeholder: "Ex: Ola {{item.username}}, desbloqueio em {{form.fim}}",
+        hint: "Use {{item.campo}} e {{form.campo}} (ex: {{item.username}}, {{form.fim}}). form.inicio/fim -> dd/MM/yyyy HH:mm:ss",
+        supportsVariables: true,
       },
       {
         key: "scheduleType",
@@ -772,14 +774,42 @@ const WORKFLOW_BRICKS = [
         default: "0",
       },
       {
+        key: "dateMode",
+        label: "Modo das datas",
+        type: "select",
+        options: [
+          { value: "calendar", label: "Calendario" },
+          { value: "dynamic", label: "Dinamico" },
+        ],
+        default: "calendar",
+      },
+      {
         key: "startDate",
         label: "Inicio",
         type: "datetime",
+        dependsOn: { key: "dateMode", values: ["calendar"] },
       },
       {
         key: "endDate",
         label: "Fim",
         type: "datetime",
+        dependsOn: { key: "dateMode", values: ["calendar"] },
+      },
+      {
+        key: "startDateExpr",
+        label: "Inicio (dinamico)",
+        type: "text",
+        placeholder: "now | now+7d | @d",
+        hint: "Use now, now+7d, now-7h, @d, @h, @m",
+        dependsOn: { key: "dateMode", values: ["dynamic"] },
+      },
+      {
+        key: "endDateExpr",
+        label: "Fim (dinamico)",
+        type: "text",
+        placeholder: "now+7d | @d",
+        hint: "Use now, now+7d, now-7h, @d, @h, @m",
+        dependsOn: { key: "dateMode", values: ["dynamic"] },
       },
       {
         key: "recurrenceType",
@@ -2468,11 +2498,128 @@ function parseDaysOfWeek(value) {
   return Array.from(new Set(days));
 }
 
+function isDynamicDateExpression(value) {
+  if (!value) return false;
+  const text = String(value).trim().toLowerCase().replace(/\s+/g, "");
+  if (!text) return false;
+  if (text === "now" || text === "@d" || text === "@h" || text === "@m") {
+    return true;
+  }
+  return /^now[+-]\d+(d|h|m)$/.test(text);
+}
+
+function isValidDynamicDateInput(value) {
+  if (!value) return false;
+  const text = String(value).trim();
+  if (!text) return false;
+  if (isDynamicDateExpression(text)) return true;
+  const parsed = new Date(text);
+  return !Number.isNaN(parsed.getTime());
+}
+
+function parseDynamicDateExpression(value, now = new Date()) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const text = raw.toLowerCase().replace(/\s+/g, "");
+  if (text === "now") return new Date(now);
+  if (text === "@d") {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  if (text === "@h") {
+    const date = new Date(now);
+    date.setMinutes(0, 0, 0);
+    return date;
+  }
+  if (text === "@m") {
+    const date = new Date(now);
+    date.setSeconds(0, 0);
+    return date;
+  }
+  const match = text.match(/^now([+-])(\d+)([dhm])$/);
+  if (!match) return null;
+  const sign = match[1] === "-" ? -1 : 1;
+  const amount = Number(match[2]);
+  if (!Number.isFinite(amount)) return null;
+  const unit = match[3];
+  const date = new Date(now);
+  if (unit === "d") {
+    date.setDate(date.getDate() + sign * amount);
+  } else if (unit === "h") {
+    date.setHours(date.getHours() + sign * amount);
+  } else if (unit === "m") {
+    date.setMinutes(date.getMinutes() + sign * amount);
+  } else {
+    return null;
+  }
+  return date;
+}
+
+function resolveScheduleDateValue(value, now = new Date()) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return parseDynamicDateExpression(text, now);
+}
+
+function formatDateTimeBr(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (num) => String(num).padStart(2, "0");
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function getBlockScheduleDates(config) {
+  const mode = String(config?.dateMode || "calendar").toLowerCase();
+  const startInput =
+    mode === "dynamic" ? normalizeText(config?.startDateExpr) : config?.startDate;
+  const endInput =
+    mode === "dynamic" ? normalizeText(config?.endDateExpr) : config?.endDate;
+  const startDate = normalizeDateTime(startInput);
+  const endDate = normalizeDateTime(endInput);
+  return { startDate, endDate, mode, startInput, endInput };
+}
+
+function getTemplateContextFromEntry(entry) {
+  if (isPrimitiveValue(entry)) {
+    return { value: entry };
+  }
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+function buildBlockFormTemplateContext(config, options = {}) {
+  const formContext = { ...(config || {}) };
+  const { startInput, endInput } = getBlockScheduleDates(config);
+  const referenceNow = options.referenceNow || new Date();
+  const startResolved = resolveScheduleDateValue(startInput, referenceNow);
+  const endResolved = resolveScheduleDateValue(endInput, referenceNow);
+  if (startResolved) {
+    formContext.inicio = formatDateTimeBr(startResolved);
+  }
+  if (endResolved) {
+    formContext.fim = formatDateTimeBr(endResolved);
+  }
+  return formContext;
+}
+
+function buildBlockMessageTemplateContext(config, entry, options = {}) {
+  return {
+    item: getTemplateContextFromEntry(entry),
+    form: buildBlockFormTemplateContext(config, options),
+  };
+}
+
 function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
-  const startDate = normalizeDateTime(config?.startDate);
-  const endDate = normalizeDateTime(config?.endDate);
+  const { startDate, endDate, mode, startInput, endInput } =
+    getBlockScheduleDates(config);
   const recurrenceType = normalizeNumber(config?.recurrenceType);
   const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
   const resolvedStartTime =
@@ -2482,9 +2629,20 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
   const startTime = normalizeTimeForApi(resolvedStartTime);
   const endTime = normalizeTimeForApi(resolvedEndTime);
   const targetType = normalizeNumber(config?.targetType) ?? 0;
-  const message =
+  const referenceNow = options.referenceNow || new Date();
+  const templateContext = buildBlockMessageTemplateContext(
+    config,
+    options.entry,
+    { referenceNow }
+  );
+  const messageTemplate =
     normalizeText(config?.message) ||
     (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+  const templateResult = interpolateTemplateString(
+    messageTemplate,
+    templateContext
+  );
+  const message = String(templateResult.text || "").trim();
   const normalizedTarget = normalizeText(targetValue);
   const skipTimeValidation = Boolean(options.skipTimeValidation);
 
@@ -2501,6 +2659,15 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
       error:
         "Campos obrigatorios: mensagem, acao, tipo, inicio, fim e alvo.",
     };
+  }
+
+  if (mode === "dynamic") {
+    if (startInput && !isValidDynamicDateInput(startInput)) {
+      return { error: "Inicio dinamico invalido." };
+    }
+    if (endInput && !isValidDynamicDateInput(endInput)) {
+      return { error: "Fim dinamico invalido." };
+    }
   }
 
   if (scheduleType === 1 && recurrenceType === null) {
@@ -2548,8 +2715,7 @@ function buildBlockSchedulePayload(config, targetValue, options = {}) {
 function buildBlockConfiguredItem(config, targetValue, options = {}) {
   const actionType = normalizeNumber(config?.actionType) ?? 0;
   const scheduleType = normalizeNumber(config?.scheduleType) ?? 0;
-  const startDate = normalizeDateTime(config?.startDate);
-  const endDate = normalizeDateTime(config?.endDate);
+  const { startDate, endDate } = getBlockScheduleDates(config);
   const recurrenceType = normalizeNumber(config?.recurrenceType);
   const daysOfWeek = parseDaysOfWeek(config?.daysOfWeek);
   const resolvedStartTime =
@@ -2559,9 +2725,20 @@ function buildBlockConfiguredItem(config, targetValue, options = {}) {
   const startTime = normalizeTimeForApi(resolvedStartTime);
   const endTime = normalizeTimeForApi(resolvedEndTime);
   const targetType = normalizeNumber(config?.targetType) ?? 0;
-  const message =
+  const referenceNow = options.referenceNow || new Date();
+  const templateContext = buildBlockMessageTemplateContext(
+    config,
+    options.entry,
+    { referenceNow }
+  );
+  const messageTemplate =
     normalizeText(config?.message) ||
     (actionType === 1 ? "Agendamento de desbloqueio" : "Agendamento de bloqueio");
+  const templateResult = interpolateTemplateString(
+    messageTemplate,
+    templateContext
+  );
+  const message = String(templateResult.text || "").trim();
 
   return {
     message,
@@ -3996,6 +4173,22 @@ function getVariableSuggestions(node) {
   return [];
 }
 
+function getBlockFormVariableSuggestions() {
+  const def = getWorkflowBrick("block");
+  const keys = new Set();
+  if (def?.fields?.length) {
+    def.fields.forEach((field) => {
+      if (field?.key) keys.add(field.key);
+    });
+  }
+  keys.add("inicio");
+  keys.add("fim");
+  return Array.from(keys)
+    .filter(Boolean)
+    .map((key) => `form.${key}`)
+    .sort();
+}
+
 function propagateNodeOutput(sourceNode) {
   const payload = getNodeOutputItem(sourceNode);
   const targets = workflowState.edges
@@ -4084,6 +4277,7 @@ async function executeBlockNode(node) {
   const sourceMode = node.config?.sourceMode || "data";
   const timeSource = node.config?.timeSource || "manual";
   const sourceLabel = getNodeDisplayName(node);
+  const referenceNow = new Date();
   let targets = [];
 
   if (sourceMode === "manual") {
@@ -4147,10 +4341,16 @@ async function executeBlockNode(node) {
   }
 
   const validationTarget = targets[0]?.target ?? targets[0];
+  const validationEntry = targets[0]?.entry ?? null;
   const validation = buildBlockSchedulePayload(
     node.config || {},
     validationTarget,
-    { skipTimeValidation: timeSource === "dynamic", sourceLabel }
+    {
+      skipTimeValidation: timeSource === "dynamic",
+      sourceLabel,
+      entry: validationEntry,
+      referenceNow,
+    }
   );
   if (validation.error) {
     setWorkflowStatus(validation.error, "warning");
@@ -4172,6 +4372,8 @@ async function executeBlockNode(node) {
     return buildBlockConfiguredItem(node.config || {}, target, {
       ...timeOverrides,
       sourceLabel,
+      entry,
+      referenceNow,
     });
   });
   const responses = [];
@@ -4191,7 +4393,7 @@ async function executeBlockNode(node) {
     const { payload, error } = buildBlockSchedulePayload(
       node.config || {},
       target,
-      { ...timeOverrides, sourceLabel }
+      { ...timeOverrides, sourceLabel, entry, referenceNow }
     );
     if (error || !payload) {
       failedCount += 1;
@@ -4899,16 +5101,15 @@ function renderWorkflow() {
 
       const meta = document.createElement("div");
       meta.className = "block-meta";
-      const startDate = node.config?.startDate || null;
-      const endDate = node.config?.endDate || null;
+      const { startInput, endInput } = getBlockScheduleDates(node.config || {});
       const scheduleType = Number(node.config?.scheduleType ?? 0);
       const nextValue =
         scheduleType === 0
-          ? startDate
-            ? formatDate(startDate)
+          ? startInput
+            ? formatDateOrText(startInput)
             : "-"
-          : startDate
-          ? formatDate(startDate)
+          : startInput
+          ? formatDateOrText(startInput)
           : "-";
       const lastRun = node.lastRunAt
         ? `${actionLabel} - ${formatDate(node.lastRunAt)}`
@@ -4936,9 +5137,10 @@ function renderWorkflow() {
         statusBadge.textContent = "Sem execucao";
       }
 
+      const endParsed = endInput ? new Date(endInput) : null;
       const isExpired =
-        endDate && !Number.isNaN(new Date(endDate).getTime())
-          ? new Date(endDate) < new Date()
+        endParsed && !Number.isNaN(endParsed.getTime())
+          ? endParsed < new Date()
           : false;
       let expiredBadge = null;
       if (isExpired) {
@@ -5638,6 +5840,19 @@ function renderWorkflowInspector(targetBody, node, emptyMessage) {
           input.type = field.inputType || "text";
         }
         input.placeholder = field.placeholder || "";
+        if (field.supportsVariables) {
+          input.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openWorkflowVariablesMenu(
+              event.clientX,
+              event.clientY,
+              node,
+              input,
+              field.key
+            );
+          });
+        }
         if (field.storage === "xone-config") {
           const xoneConfig = draft?.xoneConfig || getXoneConfigCache();
           const patchedValue = draft?.xonePatch?.[field.key];
@@ -6862,6 +7077,13 @@ function formatDate(value) {
   return date.toLocaleString("pt-BR");
 }
 
+function formatDateOrText(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("pt-BR");
+}
+
 const ACTION_LABEL = {
   0: "Lock",
   1: "Unlock",
@@ -7917,24 +8139,61 @@ function closeControlMenu() {
 
 function openWorkflowVariablesMenu(x, y, node, input, fieldKey) {
   if (!workflowVariablesMenu) return;
+  const title = workflowVariablesMenu.querySelector(".context-title");
   const body = workflowVariablesMenu.querySelector(".context-body");
   if (!body) return;
-  const suggestions = node ? getVariableSuggestions(node) : [];
+  const isBlockMessage = node?.type === "block" && fieldKey === "message";
+  if (title) {
+    title.textContent = isBlockMessage
+      ? "Variaveis"
+      : "Variaveis do passo anterior";
+  }
   body.innerHTML = "";
-  if (!suggestions.length) {
-    const empty = document.createElement("div");
-    empty.className = "context-item is-empty";
-    empty.textContent = "Sem variaveis disponiveis.";
-    body.append(empty);
+  if (isBlockMessage) {
+    const itemSuggestions = node
+      ? getVariableSuggestions(node).map((key) => `item.${key}`)
+      : [];
+    const formSuggestions = getBlockFormVariableSuggestions();
+    const addSection = (label, list) => {
+      if (!list.length) return;
+      const section = document.createElement("div");
+      section.className = "context-title";
+      section.textContent = label;
+      body.append(section);
+      list.forEach((key) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "context-item";
+        btn.dataset.value = key;
+        btn.textContent = `{{${key}}}`;
+        body.append(btn);
+      });
+    };
+    addSection("Item (data.item)", itemSuggestions);
+    addSection("Form (bloco)", formSuggestions);
+    if (!itemSuggestions.length && !formSuggestions.length) {
+      const empty = document.createElement("div");
+      empty.className = "context-item is-empty";
+      empty.textContent = "Sem variaveis disponiveis.";
+      body.append(empty);
+    }
   } else {
-    suggestions.forEach((key) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "context-item";
-      btn.dataset.value = key;
-      btn.textContent = `{{${key}}}`;
-      body.append(btn);
-    });
+    const suggestions = node ? getVariableSuggestions(node) : [];
+    if (!suggestions.length) {
+      const empty = document.createElement("div");
+      empty.className = "context-item is-empty";
+      empty.textContent = "Sem variaveis disponiveis.";
+      body.append(empty);
+    } else {
+      suggestions.forEach((key) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "context-item";
+        btn.dataset.value = key;
+        btn.textContent = `{{${key}}}`;
+        body.append(btn);
+      });
+    }
   }
   workflowVariablesContext = { nodeId: node?.id || null, input, fieldKey };
   workflowVariablesMenu.classList.add("is-open");
