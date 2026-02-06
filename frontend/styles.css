@@ -1120,7 +1120,7 @@ textarea::placeholder {
 
 .workflow-inspector {
   right: 16px;
-  width: min(320px, 38vw);
+  width: min(420px, 34vw);
 }
 
 .palette-heading {
