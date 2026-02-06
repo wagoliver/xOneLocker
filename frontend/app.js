@@ -173,7 +173,12 @@ function applyTheme(theme) {
 }
 
 function initializeTheme() {
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  let storedTheme = null;
+  try {
+    storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    storedTheme = null;
+  }
   const prefersLight =
     window.matchMedia &&
     window.matchMedia("(prefers-color-scheme: light)").matches;
@@ -195,7 +200,11 @@ function initializeTheme() {
       document.body.getAttribute(THEME_ATTRIBUTE) === "light" ? "light" : "dark";
     const next = current === "light" ? "dark" : "light";
     applyTheme(next);
-    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      /* no-op when storage is unavailable */
+    }
   });
 }
 
