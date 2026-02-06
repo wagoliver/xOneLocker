@@ -190,6 +190,37 @@ body {
   gap: 10px;
 }
 
+.page-context[data-context="control"] {
+  grid-template-columns: minmax(220px, 1.1fr) minmax(0, 2.2fr) auto;
+}
+
+.page-context[data-context="control"] .page-center {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.page-context[data-context="control"] .control-tabs {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+.page-context[data-context="control"] .control-search {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.page-context[data-context="control"] .control-filter-group {
+  flex: 1 1 420px;
+  min-width: 260px;
+  justify-content: flex-start;
+}
+
+.page-context[data-context="control"] .page-right {
+  align-self: center;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -2609,6 +2640,17 @@ body.workflow-fullscreen .workflow-canvas {
 @keyframes flowDash {
   to {
     stroke-dashoffset: -24;
+  }
+}
+
+@media (max-width: 1180px) {
+  .page-context[data-context="control"] {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .page-context[data-context="control"] .page-right {
+    justify-content: flex-start;
   }
 }
 
