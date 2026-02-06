@@ -20,7 +20,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: locker
-      INTEGRATION_API_BASE_URL: https://integration-api.featval05.xonecloud.app.br
+      INTEGRATION_API_BASE_URL: https://integration-api.homol.xonecloud.app.br
       XONE_TOKEN_URL: ${XONE_TOKEN_URL}
       XONE_API_BASE: ${XONE_API_BASE}
       XONE_CLIENT_ID: ${XONE_CLIENT_ID}
